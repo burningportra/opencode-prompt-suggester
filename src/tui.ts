@@ -16,6 +16,7 @@ type KeyLike = {
 }
 
 const tui: TuiPlugin = async (api) => {
+  await writeHeartbeat(api, { phase: "boot", rev: 13 })
   const roots = unique([api.state.path.worktree, api.state.path.directory])
   const [ghost, setGhost] = createSignal("")
   let promptRef: TuiPromptRef | undefined

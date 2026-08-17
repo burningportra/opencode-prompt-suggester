@@ -25,7 +25,11 @@
     "opencode": ">=1.18.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "*"
+    "@opencode-ai/plugin": "*",
+    "solid-js": "*"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.14"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.4.3",
