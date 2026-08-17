@@ -81,6 +81,7 @@ export async function onSessionIdle(input: {
     kind: text ? "suggestion.generated" : "suggestion.none",
     sessionID: input.sessionID,
     text,
+    raw: result.text.slice(0, 240),
   })
   await publish(input.worktree, input.sessionID, text, state)
 }
@@ -215,8 +216,8 @@ async function listMessages(client: Client, sessionID: string, directory: string
   if (!client.session.messages) return []
   const result = await sdkCall<any[]>(
     client.session.messages.bind(client.session),
-    { path: { sessionID }, query: { directory } },
     { path: { id: sessionID }, query: { directory } },
+    { path: { sessionID }, query: { directory } },
     { sessionID, directory },
   )
   return Array.isArray(result) ? result : []
@@ -231,8 +232,8 @@ async function getSession(
   try {
     return await sdkCall(
       client.session.get.bind(client.session),
-      { path: { sessionID }, query: { directory } },
       { path: { id: sessionID }, query: { directory } },
+      { path: { sessionID }, query: { directory } },
       { sessionID, directory },
     )
   } catch {

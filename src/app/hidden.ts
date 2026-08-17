@@ -37,8 +37,8 @@ export async function completeHidden(input: {
   if (model) body.model = model
   const result = await sdkCall(
     input.client.session.prompt.bind(input.client.session),
-    { path: { sessionID }, body, query: { directory: input.directory } },
     { path: { id: sessionID }, body, query: { directory: input.directory } },
+    { path: { sessionID }, body, query: { directory: input.directory } },
     { sessionID, ...body, directory: input.directory },
   )
   return { text: extractText(result), sessionID }
@@ -50,8 +50,8 @@ async function ensureHiddenSession(client: Client, existing: string | undefined,
       if (client.session.get) {
         await sdkCall(
           client.session.get.bind(client.session),
-          { path: { sessionID: existing }, query: { directory } },
           { path: { id: existing }, query: { directory } },
+          { path: { sessionID: existing }, query: { directory } },
           { sessionID: existing, directory },
         )
       }
