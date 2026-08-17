@@ -57,7 +57,7 @@ export const DEFAULT_CONFIG: SuggesterConfig = {
     noSuggestionToken: "[no suggestion]",
     customInstruction: "",
     fastPathContinueOnError: true,
-    ghostAcceptKeys: ["right", "tab"],
+    ghostAcceptKeys: ["space", "right", "tab"],
     maxAssistantTurnChars: 100000,
     maxRecentUserPrompts: 20,
     maxRecentUserPromptChars: 500,

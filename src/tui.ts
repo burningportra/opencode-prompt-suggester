@@ -4,12 +4,36 @@ import { loadConfig, loadLive, saveConfig } from "./infra/store.ts"
 import { PLUGIN_ID } from "./infra/paths.ts"
 import type { GhostAcceptKey } from "./domain/config.ts"
 
+type KeymapApi = {
+  intercept?: (fn: (evt: KeyLike) => unknown) => () => void
+  registerLayer?: (layer: Record<string, unknown>) => () => void
+  on?: (event: string, fn: (evt: KeyLike) => unknown) => () => void
+}
+
+type KeyLike = {
+  name?: string
+  key?: string
+  id?: string
+  sequence?: string
+  preventDefault?: () => void
+  stopPropagation?: () => void
+}
+
+const KEY_ALIASES: Record<string, GhostAcceptKey> = {
+  right: "right",
+  arrowright: "right",
+  "arrow-right": "right",
+  space: "space",
+  " ": "space",
+  tab: "tab",
+}
+
 const tui: TuiPlugin = async (api) => {
   const worktree = api.state.path.worktree || api.state.path.directory
   let promptRef: TuiPromptRef | undefined
   let current = ""
   let enabled = true
-  let acceptKeys: GhostAcceptKey[] = ["right", "tab"]
+  let acceptKeys: GhostAcceptKey[] = ["space", "right", "tab"]
 
   const refreshConfig = async () => {
     const config = await loadConfig(worktree)
@@ -31,10 +55,32 @@ const tui: TuiPlugin = async (api) => {
   }
 
   const accept = () => {
-    if (!enabled || !current) return
-    if (!promptRef) return
-    if (promptRef.current.input.trim()) return
+    if (!enabled || !current) return false
+    if (!promptRef) return false
+    if (promptRef.current.input.trim()) return false
     promptRef.set({ input: current, parts: [] })
+    return true
+  }
+
+  const eventKey = (evt: KeyLike): string => {
+    return String(evt.name ?? evt.key ?? evt.id ?? evt.sequence ?? "")
+      .toLowerCase()
+      .replace(/^key_/, "")
+      .replace(/^arrow-?/, "")
+  }
+
+  const shouldAccept = (evt: KeyLike): boolean => {
+    if (!enabled || !current) return false
+    if (promptRef && promptRef.current.input !== "") return false
+    const mapped = KEY_ALIASES[eventKey(evt)]
+    return Boolean(mapped && acceptKeys.includes(mapped))
+  }
+
+  const consume = (evt: KeyLike): boolean => {
+    if (!shouldAccept(evt)) return false
+    evt.preventDefault?.()
+    evt.stopPropagation?.()
+    return accept()
   }
 
   api.event.on("session.idle", () => {
@@ -46,6 +92,32 @@ const tui: TuiPlugin = async (api) => {
     void refreshLive(sessionID())
   }, 400)
   api.lifecycle.onDispose(() => clearInterval(poll))
+
+  const keymap = (api as { keymap?: KeymapApi }).keymap
+  keymap?.registerLayer?.({
+    commands: [
+      {
+        namespace: "suggester",
+        name: "suggester.accept",
+        title: "Accept suggested prompt",
+        category: "Suggester",
+        slashName: "suggester-accept",
+        run() {
+          return accept()
+        },
+      },
+    ],
+    bindings: [{ key: "ctrl+y", cmd: "suggester.accept", desc: "Accept suggestion" }],
+  })
+  keymap?.intercept?.((evt) => consume(evt) || undefined)
+  keymap?.on?.("key", (evt) => consume(evt) || undefined)
+
+  const renderer = api.renderer as { on?: (event: string, fn: (evt: KeyLike) => void) => () => void }
+  for (const event of ["key", "keypress", "keydown"]) {
+    renderer.on?.(event, (evt) => {
+      consume(evt)
+    })
+  }
 
   api.command?.register(() => [
     {
@@ -123,50 +195,26 @@ const tui: TuiPlugin = async (api) => {
       title: "Accept suggested prompt",
       value: "suggester.accept",
       category: "Suggester",
-      keybind: "suggester_accept",
       slash: { name: "suggester-accept" },
-      onSelect: accept,
+      onSelect: () => {
+        accept()
+      },
     },
   ])
-
-  const maybeAcceptKey = (name: string) => {
-    const mapped =
-      name === "right" || name === "tab" || name === "space"
-        ? (name as GhostAcceptKey)
-        : undefined
-    if (!mapped || !acceptKeys.includes(mapped)) return
-    accept()
-  }
-
-  const keymap = api as typeof api & {
-    keymap?: {
-      intercept?: (fn: (evt: { name?: string }) => boolean | void) => () => void
-    }
-  }
-  if (keymap.keymap?.intercept) {
-    keymap.keymap.intercept((evt: { name?: string }) => {
-      const name = evt.name
-      if (name !== "right" && name !== "tab" && name !== "space") return
-      if (!promptRef?.focused || promptRef.current.input !== "") return
-      if (!current || !enabled) return
-      if (!acceptKeys.includes(name)) return
-      accept()
-      return true
-    })
-  } else {
-    maybeAcceptKey("right")
-  }
 
   api.slots.register({
     order: 20,
     slots: {
-      session_prompt(_ctx: unknown, props: {
-        session_id: string
-        visible?: boolean
-        disabled?: boolean
-        on_submit?: () => void
-        ref?: (ref: TuiPromptRef | undefined) => void
-      }) {
+      session_prompt(
+        _ctx: unknown,
+        props: {
+          session_id: string
+          visible?: boolean
+          disabled?: boolean
+          on_submit?: () => void
+          ref?: (ref: TuiPromptRef | undefined) => void
+        },
+      ) {
         const placeholders = enabled && current ? { normal: [current] } : undefined
         return api.ui.Prompt({
           sessionID: props.session_id,
