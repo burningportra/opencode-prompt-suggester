@@ -29,8 +29,16 @@ const tui: TuiPlugin = async (api) => {
   const [ghost, setGhost] = createSignal("")
   const [enabled, setEnabled] = createSignal(true)
   let promptRef: TuiPromptRef | undefined
-  let input: { focused?: boolean; placeholder?: string; insertText?: (text: string) => void; plainText?: string } | undefined
+  let input: {
+    focused?: boolean
+    placeholder?: string
+    insertText?: (text: string) => void
+    plainText?: string
+    clear?: () => void
+    setText?: (text: string) => void
+  } | undefined
   let acceptKeys: GhostAcceptKey[] = ["space", "right", "tab"]
+  let lastSent = ""
 
   const refreshConfig = async () => {
     const config = await loadConfig(worktree)
@@ -44,9 +52,17 @@ const tui: TuiPlugin = async (api) => {
   }
 
   const refreshLive = async (id?: string) => {
-    const live = await loadLive(worktree)
-    if (!live || (id && live.sessionID !== id)) return
+    const live = await loadLive(worktree, id)
+    if (!live || (id && live.sessionID !== id)) {
+      if (id) setGhost("")
+      return
+    }
     setGhost(enabled() && live.status === "ready" ? live.text : "")
+    if (lastSent && input?.plainText?.trim() === lastSent) {
+      input.clear?.()
+      input.setText?.("")
+      lastSent = ""
+    }
   }
 
   const accept = () => {
@@ -179,9 +195,12 @@ const tui: TuiPlugin = async (api) => {
                   const typed = input?.plainText?.trim() || ""
                   const text = typed || ghost()
                   if (!text) return
+                  lastSent = text
                   promptRef?.set({ input: text, parts: [] })
                   promptRef?.submit()
                   props.on_submit?.()
+                  input?.clear?.()
+                  input?.setText?.("")
                 }}
                 ref={(node: typeof input) => {
                   input = node

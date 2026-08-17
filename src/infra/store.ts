@@ -54,12 +54,22 @@ export async function saveSeed(worktree: string, seed: SeedArtifact, stateOverri
   await writeJson(seedPath(worktree, stateOverride), seed)
 }
 
-export async function loadLive(worktree: string, stateOverride?: string): Promise<LiveSuggestion | null> {
-  return readJson<LiveSuggestion>(livePath(worktree, stateOverride))
+export async function loadLive(
+  worktree: string,
+  sessionID?: string,
+  stateOverride?: string,
+): Promise<LiveSuggestion | null> {
+  if (sessionID) {
+    const exact = await readJson<LiveSuggestion>(livePath(worktree, sessionID, stateOverride))
+    if (exact) return exact
+  }
+  const fallback = await readJson<LiveSuggestion>(livePath(worktree, undefined, stateOverride))
+  if (fallback && sessionID && fallback.sessionID !== sessionID) return null
+  return fallback
 }
 
 export async function saveLive(worktree: string, live: LiveSuggestion, stateOverride?: string): Promise<void> {
-  await writeJson(livePath(worktree, stateOverride), live)
+  await writeJson(livePath(worktree, live.sessionID, stateOverride), live)
 }
 
 interface SessionState {

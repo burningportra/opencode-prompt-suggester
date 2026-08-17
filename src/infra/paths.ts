@@ -31,7 +31,8 @@ export function seedPath(worktree: string, stateOverride?: string): string {
   return path.join(projectDir(worktree, stateOverride), "seed.json")
 }
 
-export function livePath(worktree: string, stateOverride?: string): string {
+export function livePath(worktree: string, sessionID?: string, stateOverride?: string): string {
+  if (sessionID) return path.join(sessionDir(worktree, sessionID, stateOverride), "live.json")
   return path.join(projectDir(worktree, stateOverride), "live.json")
 }
 
