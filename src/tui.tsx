@@ -1,13 +1,12 @@
 /** @jsxImportSource @opentui/solid */
-import { readdir } from "node:fs/promises"
+import { readdir, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { createSignal } from "solid-js"
-import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { requestReseed, statusText } from "./app/suggester.ts"
-import { loadConfig, loadLive, readJson, saveConfig } from "./infra/store.ts"
+import type { TuiPlugin, TuiPluginModule, TuiPromptRef } from "@opencode-ai/plugin/tui"
+import { loadConfig, loadLive, readJson, writeJson } from "./infra/store.ts"
 import { PLUGIN_ID, stateRoot } from "./infra/paths.ts"
-import { sessionCall } from "./infra/sdk.ts"
 import type { LiveSuggestion } from "./domain/suggestion.ts"
+
+void writeFile(path.join(stateRoot(), "tui-module-load.txt"), `${new Date().toISOString()} eval\n`).catch(() => undefined)
 
 type KeyLike = {
   name?: string
@@ -22,17 +21,24 @@ type Field = {
   insertText?: (text: string) => void
   clear?: () => void
   setText?: (text: string) => void
-  focused?: boolean
 }
 
 const ACCEPT = new Set(["space", " ", "right", "arrowright", "tab"])
 const DISMISS = new Set(["backspace", "delete"])
 
 const tui: TuiPlugin = async (api) => {
-  const roots = unique([api.state.path.worktree, api.state.path.directory])
-  const [ghost, setGhost] = createSignal("")
-  let field: Field | undefined
+  await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
+    ts: new Date().toISOString(),
+    phase: "boot",
+    rev: 17,
+  })
+
+  const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
+  const solid = await import("solid-js").catch(() => undefined)
+  const [ghost, setGhost] = solid?.createSignal("") ?? [() => "", (_: string) => undefined]
   let dismissed = ""
+  let promptRef: TuiPromptRef | undefined
+  let field: Field | undefined
 
   const sessionID = () => {
     const route = api.route.current
@@ -40,61 +46,41 @@ const tui: TuiPlugin = async (api) => {
     return undefined
   }
 
-  const empty = () => !field?.plainText
+  const typed = () => field?.plainText ?? promptRef?.current.input ?? ""
 
   const accept = () => {
     const text = ghost()
-    if (!text || !empty()) return false
+    if (!text || typed().trim()) return false
     field?.insertText?.(text)
     field?.setText?.(text)
+    promptRef?.set({ input: text, parts: [] })
     setGhost("")
     return true
   }
 
   const refresh = async () => {
-    const config = await loadConfig(roots[0] ?? api.state.path.directory)
-    if (!config.enabled) {
-      setGhost("")
-      return
-    }
     const id = sessionID()
     const live = await findLive(roots, id)
+    await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
+      ts: new Date().toISOString(),
+      phase: "poll",
+      rev: 17,
+      sessionID: id ?? "",
+      live: live?.text ?? "",
+      status: live?.status ?? "missing",
+    }).catch(() => undefined)
+    const root = roots[0]
+    if (root) {
+      const config = await loadConfig(root)
+      if (!config.enabled) {
+        setGhost("")
+        return
+      }
+    }
     if (!live || live.status !== "ready" || !live.text) return
     if (id && live.sessionID !== id) return
     if (live.text === dismissed) return
     setGhost(live.text)
-  }
-
-  const send = async (text: string) => {
-    const id = sessionID()
-    if (!id || !text.trim()) return
-    dismissed = ""
-    setGhost("")
-    field?.clear?.()
-    field?.setText?.("")
-    const client = api.client as { session: { prompt: (...args: never[]) => Promise<unknown> } }
-    await sessionCall(client.session.prompt.bind(client.session), id, {
-      directory: api.state.path.directory,
-      parts: [{ type: "text", text: text.trim() }],
-    })
-  }
-
-  const onKey = (evt: KeyLike) => {
-    const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-    if (!empty()) return
-    if (ACCEPT.has(name) || ACCEPT.has(name.replace(/^arrow/, ""))) {
-      if (!ghost()) return
-      evt.preventDefault?.()
-      evt.stopPropagation?.()
-      accept()
-      return
-    }
-    if (DISMISS.has(name) && ghost()) {
-      evt.preventDefault?.()
-      evt.stopPropagation?.()
-      dismissed = ghost()
-      setGhost("")
-    }
   }
 
   api.event.on("session.idle", () => {
@@ -103,13 +89,14 @@ const tui: TuiPlugin = async (api) => {
   })
   const poll = setInterval(() => {
     void refresh()
-  }, 250)
+    if (ghost() && (typed() === " " || typed() === "\t")) accept()
+  }, 80)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
   const keymap = (api as { keymap?: { intercept?: (fn: (evt: KeyLike) => unknown) => () => void } }).keymap
   keymap?.intercept?.((evt) => {
+    if (typed()) return
     const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-    if (!empty()) return
     if (ACCEPT.has(name) && ghost()) {
       evt.preventDefault?.()
       accept()
@@ -123,55 +110,6 @@ const tui: TuiPlugin = async (api) => {
     }
   })
 
-  api.command?.register(() => [
-    {
-      title: "Accept suggested prompt",
-      value: "suggester.accept",
-      slash: { name: "suggester-accept" },
-      onSelect: () => {
-        accept()
-      },
-    },
-    {
-      title: "Prompt suggester",
-      value: "suggester.status",
-      slash: { name: "suggester" },
-      async onSelect() {
-        api.ui.dialog.replace(() =>
-          api.ui.DialogAlert({
-            title: "Suggester",
-            message: await statusText(roots[0] ?? api.state.path.directory, sessionID() ?? "none"),
-          }),
-        )
-      },
-    },
-    {
-      title: "Reseed",
-      value: "suggester.reseed",
-      onSelect: () => {
-        const id = sessionID()
-        const root = roots[0]
-        if (!id || !root) return
-        void requestReseed({
-          client: api.client,
-          directory: api.state.path.directory,
-          worktree: root,
-          sessionID: id,
-        })
-      },
-    },
-    {
-      title: "Disable prompt suggester",
-      value: "suggester.off",
-      onSelect: () => {
-        const root = roots[0]
-        if (!root) return
-        void saveConfig(root, "project", { enabled: false })
-        setGhost("")
-      },
-    },
-  ])
-
   api.slots.register({
     order: 50,
     slots: {
@@ -182,6 +120,7 @@ const tui: TuiPlugin = async (api) => {
           visible?: boolean
           disabled?: boolean
           on_submit?: () => void
+          ref?: (ref: TuiPromptRef | undefined) => void
         },
       ) {
         const theme = api.theme.current
@@ -192,7 +131,6 @@ const tui: TuiPlugin = async (api) => {
               paddingLeft={2}
               paddingRight={2}
               paddingTop={1}
-              paddingBottom={1}
               backgroundColor={theme.backgroundElement}
             >
               <textarea
@@ -205,16 +143,46 @@ const tui: TuiPlugin = async (api) => {
                 focusedTextColor={theme.text}
                 focusedBackgroundColor={theme.backgroundElement}
                 cursorColor={theme.text}
-                onKeyDown={onKey}
+                onKeyDown={(evt: KeyLike) => {
+                  if (typed()) return
+                  const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
+                  if (ACCEPT.has(name) && ghost()) {
+                    evt.preventDefault?.()
+                    accept()
+                  }
+                  if (DISMISS.has(name) && ghost()) {
+                    evt.preventDefault?.()
+                    dismissed = ghost()
+                    setGhost("")
+                  }
+                }}
                 onSubmit={() => {
-                  const typed = field?.plainText?.trim() || ""
-                  void send(typed || ghost())
+                  const text = typed().trim() || ghost()
+                  if (!text) return
+                  promptRef?.set({ input: text, parts: [] })
+                  promptRef?.submit()
                   props.on_submit?.()
+                  field?.clear?.()
+                  field?.setText?.("")
+                  setGhost("")
                 }}
                 ref={(node: Field) => {
                   field = node
                 }}
               />
+            </box>
+            <box visible={false} height={0}>
+              {api.ui.Prompt({
+                sessionID: props.session_id,
+                visible: false,
+                disabled: props.disabled,
+                showPlaceholder: false,
+                onSubmit: props.on_submit,
+                ref: (ref) => {
+                  promptRef = ref
+                  props.ref?.(ref)
+                },
+              })}
             </box>
           </box>
         )
@@ -231,19 +199,15 @@ async function findLive(roots: string[], sessionID?: string): Promise<LiveSugges
     if (live) return live
   }
   if (!sessionID) return null
-  const root = stateRoot()
-  const projects = await readdir(path.join(root, "projects")).catch(() => [])
+  const base = stateRoot()
+  const projects = await readdir(path.join(base, "projects")).catch(() => [])
   for (const project of projects) {
     const live = await readJson<LiveSuggestion>(
-      path.join(root, "projects", project, "sessions", sessionID, "live.json"),
+      path.join(base, "projects", project, "sessions", sessionID, "live.json"),
     )
     if (live) return live
   }
   return null
-}
-
-function unique(values: Array<string | undefined>) {
-  return [...new Set(values.filter((value): value is string => Boolean(value)))]
 }
 
 export default {
