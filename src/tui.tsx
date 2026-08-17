@@ -20,7 +20,7 @@ const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-    rev: 21,
+      rev: 22,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
@@ -51,7 +51,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-      rev: 21,
+    rev: 22,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
@@ -111,18 +111,27 @@ const tui: TuiPlugin = async (api) => {
         },
       ) {
         const text = ghost()
-        return api.ui.Prompt({
-          sessionID: props.session_id,
-          visible: props.visible,
-          disabled: props.disabled,
-          onSubmit: props.on_submit,
-          showPlaceholder: true,
-          placeholders: text ? { normal: [text] } : undefined,
-          ref: (ref) => {
-            promptRef = ref
-            props.ref?.(ref)
-          },
-        })
+        const theme = api.theme.current
+        return (
+          <box width="100%">
+            {text ? (
+              <box width="100%" paddingLeft={2} paddingBottom={0}>
+                <text fg={theme.textMuted}>{text}</text>
+              </box>
+            ) : null}
+            {api.ui.Prompt({
+              sessionID: props.session_id,
+              visible: props.visible,
+              disabled: props.disabled,
+              onSubmit: props.on_submit,
+              showPlaceholder: !text,
+              ref: (ref) => {
+                promptRef = ref
+                props.ref?.(ref)
+              },
+            })}
+          </box>
+        )
       },
     },
   } as never)
