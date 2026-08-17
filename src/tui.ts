@@ -32,6 +32,7 @@ const tui: TuiPlugin = async (api) => {
   const worktree = api.state.path.worktree || api.state.path.directory
   let promptRef: TuiPromptRef | undefined
   let current = ""
+  let applied = ""
   let enabled = true
   let acceptKeys: GhostAcceptKey[] = ["space", "right", "tab"]
 
@@ -59,7 +60,15 @@ const tui: TuiPlugin = async (api) => {
     if (!promptRef) return false
     if (promptRef.current.input.trim()) return false
     promptRef.set({ input: current, parts: [] })
+    applied = current
     return true
+  }
+
+  const prefill = () => {
+    if (!enabled || !current || current === applied) return
+    if (!promptRef || promptRef.current.input.trim()) return
+    promptRef.set({ input: current, parts: [] })
+    applied = current
   }
 
   const eventKey = (evt: KeyLike): string => {
@@ -89,7 +98,7 @@ const tui: TuiPlugin = async (api) => {
 
   const poll = setInterval(() => {
     void refreshConfig()
-    void refreshLive(sessionID())
+    void refreshLive(sessionID()).then(prefill)
   }, 400)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
