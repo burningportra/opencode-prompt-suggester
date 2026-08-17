@@ -6,7 +6,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kevtrinh/opencode-prompt-suggester.git"
+    "url": "git+https://github.com/burningportra/opencode-prompt-suggester.git"
   },
   "exports": {
     "./server": "./src/server.ts",
