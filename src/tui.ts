@@ -19,11 +19,12 @@ const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-    rev: 15,
+    rev: 16,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
-  let ghost = ""
+  const solid = await import("solid-js").catch(() => undefined)
+  const [ghost, setGhost] = solid?.createSignal("") ?? [() => "", (_: string) => undefined]
   let dismissed = ""
   let promptRef: TuiPromptRef | undefined
 
@@ -36,9 +37,10 @@ const tui: TuiPlugin = async (api) => {
   const typed = () => promptRef?.current.input ?? ""
 
   const accept = () => {
-    if (!ghost || !promptRef) return false
-    promptRef.set({ input: ghost, parts: [] })
-    ghost = ""
+    const text = ghost()
+    if (!text || !promptRef) return false
+    promptRef.set({ input: text, parts: [] })
+    setGhost("")
     return true
   }
 
@@ -48,7 +50,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-      rev: 15,
+      rev: 16,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
@@ -57,14 +59,14 @@ const tui: TuiPlugin = async (api) => {
     if (root) {
       const config = await loadConfig(root)
       if (!config.enabled) {
-        ghost = ""
+        setGhost("")
         return
       }
     }
     if (!live || live.status !== "ready" || !live.text) return
     if (id && live.sessionID !== id) return
     if (live.text === dismissed) return
-    ghost = live.text
+    setGhost(live.text)
   }
 
   api.event.on("session.idle", () => {
@@ -73,7 +75,7 @@ const tui: TuiPlugin = async (api) => {
   })
   const poll = setInterval(() => {
     void refresh()
-    if (ghost && (typed() === " " || typed() === "\t")) accept()
+    if (ghost() && (typed() === " " || typed() === "\t")) accept()
   }, 80)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
@@ -81,15 +83,15 @@ const tui: TuiPlugin = async (api) => {
   keymap?.intercept?.((evt) => {
     if (typed()) return
     const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-    if ((name === "space" || name === " " || name === "right" || name === "arrowright" || name === "tab") && ghost) {
+    if ((name === "space" || name === " " || name === "right" || name === "arrowright" || name === "tab") && ghost()) {
       evt.preventDefault?.()
       accept()
       return true
     }
-    if ((name === "backspace" || name === "delete") && ghost) {
+    if ((name === "backspace" || name === "delete") && ghost()) {
       evt.preventDefault?.()
-      dismissed = ghost
-      ghost = ""
+      dismissed = ghost()
+      setGhost("")
       return true
     }
   })
@@ -113,7 +115,7 @@ const tui: TuiPlugin = async (api) => {
           disabled: props.disabled,
           onSubmit: props.on_submit,
           showPlaceholder: true,
-          placeholders: ghost ? { normal: [ghost] } : undefined,
+          placeholders: ghost() ? { normal: [ghost()] } : undefined,
           ref: (ref) => {
             promptRef = ref
             props.ref?.(ref)
