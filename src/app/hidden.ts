@@ -6,6 +6,7 @@ type Client = {
     create: (...args: never[]) => Promise<unknown>
     prompt: (...args: never[]) => Promise<unknown>
     get?: (...args: never[]) => Promise<unknown>
+    delete?: (...args: never[]) => Promise<unknown>
   }
 }
 
@@ -17,12 +18,18 @@ export async function completeHidden(input: {
   prompt: string
   modelSpec?: string
   smallModel?: string
+  reuse?: boolean
 }): Promise<{ text: string; sessionID: string }> {
-  const sessionID = await ensureHiddenSession(input.client, input.hiddenSessionID, input.directory)
+  const sessionID = await ensureHiddenSession(
+    input.client,
+    input.reuse ? input.hiddenSessionID : undefined,
+    input.directory,
+  )
   const model = parseModel(input.modelSpec === "small" ? input.smallModel : input.modelSpec)
   const body: Record<string, unknown> = {
     system: input.system,
     parts: [{ type: "text", text: input.prompt }],
+    agent: "plan",
     tools: {
       bash: false,
       edit: false,
@@ -40,6 +47,11 @@ export async function completeHidden(input: {
     sessionID,
     { directory: input.directory, ...body },
   )
+  if (!input.reuse && input.client.session.delete) {
+    await sessionCall(input.client.session.delete.bind(input.client.session), sessionID, {
+      directory: input.directory,
+    }).catch(() => undefined)
+  }
   return { text: extractText(result), sessionID }
 }
 

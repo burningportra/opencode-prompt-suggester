@@ -72,6 +72,7 @@ export async function runSeeder(input: {
       prompt,
       modelSpec: input.config.inference.seederModel,
       smallModel: input.smallModel,
+      reuse: true,
     })
     hiddenSessionID = result.sessionID
     const parsed = parseJsonObject(result.text) as {

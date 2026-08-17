@@ -44,13 +44,6 @@ export async function onSessionIdle(input: {
   const state = await loadSessionState(input.worktree, input.sessionID)
   state.turnCount = (state.turnCount ?? 0) + 1
 
-  if (
-    config.reseed.enabled &&
-    (state.turnCount === 1 || state.turnCount % config.reseed.turnCheckInterval === 0)
-  ) {
-    queueReseed(input, config, "idle")
-  }
-
   const messages = await listMessages(input.client, input.sessionID, input.directory)
   const turnStatus = inferTurnStatus(messages)
   if (turnStatus !== "success" && config.suggestion.fastPathContinueOnError) {
@@ -68,14 +61,13 @@ export async function onSessionIdle(input: {
   })
   const result = await completeHidden({
     client: input.client,
-    hiddenSessionID: state.hiddenSessionID,
     directory: input.directory,
-    system: "You write the user's next OpenCode prompt. Return only that prompt text.",
+    system: "Write only the user's next prompt. One short line. No tools.",
     prompt: renderSuggestionPrompt(context),
     modelSpec: config.inference.suggesterModel,
     smallModel: smallModelByDir.get(input.directory),
+    reuse: false,
   })
-  state.hiddenSessionID = result.sessionID
   let text = normalizeSuggestion(
     result.text,
     config.suggestion.noSuggestionToken,
@@ -92,6 +84,12 @@ export async function onSessionIdle(input: {
   })
   await publish(input.worktree, input.sessionID, text, state)
   if (text) await pushToPrompt(input.client, text)
+  if (
+    config.reseed.enabled &&
+    (state.turnCount === 1 || state.turnCount % config.reseed.turnCheckInterval === 0)
+  ) {
+    queueReseed(input, config, "idle")
+  }
 }
 
 export async function onUserMessage(input: {
@@ -188,10 +186,8 @@ async function runReseed(
     config,
     previous: await loadSeed(input.worktree),
     trigger,
-    hiddenSessionID: state.hiddenSessionID,
     smallModel: smallModelByDir.get(input.directory),
   })
-  state.hiddenSessionID = result.hiddenSessionID
   state.usage = addUsage(state.usage, { seederCalls: 1, seederSteps: result.steps })
   await saveSeed(input.worktree, result.seed)
   await saveSessionState(input.worktree, input.sessionID, state)
