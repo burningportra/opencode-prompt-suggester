@@ -5,7 +5,7 @@ import { normalizeSuggestion, type LiveSuggestion, type TurnStatus } from "../do
 import { addUsage } from "../domain/usage.ts"
 import { appendLog, loadConfig, loadSeed, loadSessionState, saveLive, saveSeed, saveSessionState } from "../infra/store.ts"
 import { HIDDEN_SESSION_TITLE } from "../infra/paths.ts"
-import { sdkCall } from "../infra/sdk.ts"
+import { sessionCall } from "../infra/sdk.ts"
 import { renderSuggestionPrompt } from "../prompts/suggestion-template.ts"
 import { buildSuggestionContext } from "./context.ts"
 import { completeHidden } from "./hidden.ts"
@@ -214,12 +214,9 @@ function pending(sessionID: string): LiveSuggestion {
 
 async function listMessages(client: Client, sessionID: string, directory: string): Promise<any[]> {
   if (!client.session.messages) return []
-  const result = await sdkCall<any[]>(
-    client.session.messages.bind(client.session),
-    { path: { id: sessionID }, query: { directory } },
-    { path: { sessionID }, query: { directory } },
-    { sessionID, directory },
-  )
+  const result = await sessionCall<any[]>(client.session.messages.bind(client.session), sessionID, {
+    directory,
+  })
   return Array.isArray(result) ? result : []
 }
 
@@ -230,12 +227,7 @@ async function getSession(
 ): Promise<{ title?: string } | null> {
   if (!client.session.get) return null
   try {
-    return await sdkCall(
-      client.session.get.bind(client.session),
-      { path: { id: sessionID }, query: { directory } },
-      { path: { sessionID }, query: { directory } },
-      { sessionID, directory },
-    )
+    return await sessionCall(client.session.get.bind(client.session), sessionID, { directory })
   } catch {
     return null
   }

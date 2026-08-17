@@ -1,5 +1,5 @@
 import { HIDDEN_SESSION_TITLE } from "../infra/paths.ts"
-import { extractText, parseModel, sdkCall } from "../infra/sdk.ts"
+import { extractText, parseModel, sdkCall, sessionCall } from "../infra/sdk.ts"
 
 type Client = {
   session: {
@@ -35,11 +35,10 @@ export async function completeHidden(input: {
     },
   }
   if (model) body.model = model
-  const result = await sdkCall(
+  const result = await sessionCall(
     input.client.session.prompt.bind(input.client.session),
-    { path: { id: sessionID }, body, query: { directory: input.directory } },
-    { path: { sessionID }, body, query: { directory: input.directory } },
-    { sessionID, ...body, directory: input.directory },
+    sessionID,
+    { directory: input.directory, ...body },
   )
   return { text: extractText(result), sessionID }
 }
@@ -48,12 +47,7 @@ async function ensureHiddenSession(client: Client, existing: string | undefined,
   if (existing) {
     try {
       if (client.session.get) {
-        await sdkCall(
-          client.session.get.bind(client.session),
-          { path: { id: existing }, query: { directory } },
-          { path: { sessionID: existing }, query: { directory } },
-          { sessionID: existing, directory },
-        )
+        await sessionCall(client.session.get.bind(client.session), existing, { directory })
       }
       return existing
     } catch {

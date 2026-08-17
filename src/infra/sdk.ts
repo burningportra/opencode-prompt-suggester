@@ -2,7 +2,7 @@ export async function sdkCall<T>(fn: (...args: never[]) => Promise<unknown>, ...
   let last: Error | undefined
   for (const args of attempts) {
     try {
-      const result = await (fn as (arg: unknown) => Promise<unknown>)(args)
+      const result = await invoke(fn, args)
       const error = sdkError(result)
       if (error) {
         last = new Error(errorMessage(error))
@@ -14,6 +14,30 @@ export async function sdkCall<T>(fn: (...args: never[]) => Promise<unknown>, ...
     }
   }
   throw last ?? new Error("SDK call failed")
+}
+
+async function invoke(fn: (...args: never[]) => Promise<unknown>, args: unknown): Promise<unknown> {
+  if (Array.isArray(args)) return (fn as (...args: unknown[]) => Promise<unknown>)(...args)
+  return (fn as (arg: unknown) => Promise<unknown>)(args)
+}
+
+export async function sessionCall<T>(
+  method: (...args: never[]) => Promise<unknown>,
+  sessionID: string,
+  extra: Record<string, unknown> = {},
+): Promise<T> {
+  const directory = typeof extra.directory === "string" ? extra.directory : undefined
+  const { directory: _directory, ...fields } = extra
+  return sdkCall<T>(
+    method,
+    { id: sessionID, sessionID, directory, ...fields },
+    { sessionID, directory, ...fields },
+    { id: sessionID, directory, ...fields },
+    { path: { id: sessionID }, query: directory ? { directory } : undefined, body: fields },
+    { path: { sessionID }, query: directory ? { directory } : undefined, body: fields },
+    [{ sessionID, directory, ...fields }],
+    [{ id: sessionID, directory, ...fields }],
+  )
 }
 
 export function unwrap<T>(result: unknown): T {

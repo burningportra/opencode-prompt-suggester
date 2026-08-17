@@ -2,9 +2,14 @@ import type { Plugin, PluginModule } from "@opencode-ai/plugin"
 import { onSessionIdle, onUserMessage, rememberSmallModel } from "./app/suggester.ts"
 import { PLUGIN_ID } from "./infra/paths.ts"
 
+const PLUGIN_REVISION = 2
+
 const server: Plugin = async ({ client, directory, worktree, project }) => {
   const root = worktree || project?.worktree || directory
   rememberSmallModel(directory, undefined)
+  await client.app.log({
+    body: { service: PLUGIN_ID, level: "info", message: `loaded revision ${PLUGIN_REVISION}` },
+  })
 
   return {
     config: async (cfg) => {
