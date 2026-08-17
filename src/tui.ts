@@ -13,7 +13,6 @@ const tui: TuiPlugin = async (api) => {
   let promptRef: TuiPromptRef | undefined
 
   await writeHeartbeat(api, { phase: "init", roots })
-  api.ui.toast({ title: "suggester", message: "TUI plugin loaded", variant: "success", duration: 4000 })
   booted = true
 
   const sessionID = () => {
@@ -36,18 +35,11 @@ const tui: TuiPlugin = async (api) => {
   const refresh = async () => {
     const id = sessionID()
     const live = await findLive(roots, id)
-    await writeHeartbeat(api, {
-      phase: "poll",
-      roots,
-      sessionID: id,
-      live: live?.text ?? "",
-      status: live?.status ?? "missing",
-    })
     if (!live || live.status !== "ready" || !live.text) return
     if (id && live.sessionID !== id) return
     if (live.text === last) return
     last = live.text
-    api.ui.toast({ title: "next", message: live.text, variant: "info", duration: 8000 })
+    await writeHeartbeat(api, { phase: "fill", sessionID: id, live: live.text })
     await accept(live.text)
   }
 
@@ -100,7 +92,6 @@ const tui: TuiPlugin = async (api) => {
           worktree: root,
           sessionID: id,
         })
-        api.ui.toast({ message: "Reseed finished", variant: "success" })
       },
     },
     {
@@ -114,6 +105,7 @@ const tui: TuiPlugin = async (api) => {
       },
     },
   ])
+
 
   api.slots.register({
     order: 50,
