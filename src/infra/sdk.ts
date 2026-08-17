@@ -31,12 +31,7 @@ export async function sessionCall<T>(
   return sdkCall<T>(
     method,
     { id: sessionID, sessionID, directory, ...fields },
-    { sessionID, directory, ...fields },
-    { id: sessionID, directory, ...fields },
     { path: { id: sessionID }, query: directory ? { directory } : undefined, body: fields },
-    { path: { sessionID }, query: directory ? { directory } : undefined, body: fields },
-    [{ sessionID, directory, ...fields }],
-    [{ id: sessionID, directory, ...fields }],
   )
 }
 
@@ -68,20 +63,28 @@ function errorMessage(error: unknown): string {
 }
 
 export function extractText(result: unknown): string {
-  const payload = unwrap<{
-    parts?: Array<{ type?: string; text?: string }>
-    info?: { parts?: Array<{ type?: string; text?: string }> }
-  }>(result)
-  const parts = Array.isArray(payload?.parts)
-    ? payload.parts
-    : Array.isArray(payload?.info?.parts)
-      ? payload.info.parts
-      : []
-  return parts
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text ?? "")
-    .join("\n")
-    .trim()
+  if (typeof result === "string") return result.trim()
+  const payload = unwrap<unknown>(result)
+  if (typeof payload === "string") return payload.trim()
+  if (payload && typeof payload === "object") {
+    const obj = payload as {
+      text?: unknown
+      parts?: Array<{ type?: unknown; text?: unknown }>
+      info?: { parts?: Array<{ type?: unknown; text?: unknown }> }
+    }
+    if (typeof obj.text === "string") return obj.text.trim()
+    const parts = Array.isArray(obj.parts)
+      ? obj.parts
+      : Array.isArray(obj.info?.parts)
+        ? obj.info.parts
+        : []
+    return parts
+      .filter((part) => part?.type === "text" && typeof part.text === "string")
+      .map((part) => String(part.text ?? ""))
+      .join("\n")
+      .trim()
+  }
+  return ""
 }
 
 export function parseModel(spec: string | undefined): { providerID: string; modelID: string } | undefined {

@@ -38,4 +38,4 @@ Suggestions and seeding run in a hidden `[prompt-suggester]` session so they do 
 
 ## Limits
 
-OpenCode has no stock ghost-text API. This plugin replaces the `session_prompt` slot and re-renders the built-in `Prompt` with a dynamic placeholder. If the wrapper misbehaves, remove the plugin from `tui.json` and restart.
+OpenCode's Prompt always paints `Ask anything...`. This plugin keeps that widget so typing and submit stay intact, and shows the suggestion as muted text above the box. If the wrapper misbehaves, remove the plugin from `tui.json` and restart.

@@ -36,8 +36,16 @@ export interface SuggestionPromptContext {
 }
 
 export function normalizeSuggestion(raw: string, noSuggestionToken: string, maxChars: number): string | null {
-  const text = raw.trim().replace(/^["'`]+|["'`]+$/g, "")
+  const text = stripSpecialTokens(raw).replace(/^["'`]+|["'`]+$/g, "")
   if (!text || text === noSuggestionToken) return null
   if (text.length <= maxChars) return text
   return text.slice(0, maxChars).trim()
+}
+
+export function stripSpecialTokens(raw: string): string {
+  return raw
+    .replace(/<\|[^|>]+\|>/g, "")
+    .replace(/<\/?s>/g, "")
+    .replace(/\uFFFC/g, "")
+    .trim()
 }

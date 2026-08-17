@@ -1,10 +1,8 @@
 import type { SuggesterConfig } from "../domain/config.ts"
-import type { SeedArtifact } from "../domain/seed.ts"
 import { classifySteering, type SteeringEvent } from "../domain/steering.ts"
 import { normalizeSuggestion, type LiveSuggestion, type TurnStatus } from "../domain/suggestion.ts"
 import { addUsage } from "../domain/usage.ts"
-import { appendLog, loadConfig, loadSeed, loadSessionState, saveLive, saveSeed, saveSessionState } from "../infra/store.ts"
-import { HIDDEN_SESSION_TITLE } from "../infra/paths.ts"
+import { loadConfig, loadSeed, loadSessionState, saveLive, saveSeed, saveSessionState } from "../infra/store.ts"
 import { sessionCall } from "../infra/sdk.ts"
 import { renderSuggestionPrompt } from "../prompts/suggestion-template.ts"
 import { buildSuggestionContext } from "./context.ts"
@@ -16,14 +14,11 @@ type Client = Parameters<typeof completeHidden>[0]["client"] & {
     messages?: (...args: never[]) => Promise<unknown>
     get?: (...args: never[]) => Promise<unknown>
   }
-  tui?: {
-    appendPrompt?: (...args: never[]) => Promise<unknown>
-    showToast?: (...args: never[]) => Promise<unknown>
-  }
 }
 
 const reseeding = new Map<string, Promise<void>>()
 const smallModelByDir = new Map<string, string | undefined>()
+const hiddenByDir = new Map<string, string>()
 
 export function rememberSmallModel(directory: string, spec?: string): void {
   smallModelByDir.set(directory, spec)
@@ -35,54 +30,66 @@ export async function onSessionIdle(input: {
   worktree: string
   sessionID: string
 }): Promise<void> {
-  const session = await getSession(input.client, input.sessionID, input.directory)
-  if (session?.title === HIDDEN_SESSION_TITLE) return
-  const config = await loadConfig(input.worktree)
+  if ([...hiddenByDir.values()].includes(input.sessionID)) return
+  const [config, state, messages] = await Promise.all([
+    loadConfig(input.worktree),
+    loadSessionState(input.worktree, input.sessionID),
+    listMessages(input.client, input.sessionID, input.directory),
+  ])
   if (!config.enabled) return
-
-  await saveLive(input.worktree, pending(input.sessionID))
-  const state = await loadSessionState(input.worktree, input.sessionID)
   state.turnCount = (state.turnCount ?? 0) + 1
 
-  const messages = await listMessages(input.client, input.sessionID, input.directory)
   const turnStatus = inferTurnStatus(messages)
   if (turnStatus !== "success" && config.suggestion.fastPathContinueOnError) {
     await publish(input.worktree, input.sessionID, "continue", state)
     return
   }
 
-  const seed = await loadSeed(input.worktree)
   const context = buildSuggestionContext({
     config,
-    seed,
+    seed: null,
     messages,
     steering: state.steering,
     turnStatus,
   })
+  const instant = fallbackSuggestion(context)
+  await publish(input.worktree, input.sessionID, instant, state, { count: false })
+  const seed = await loadSeed(input.worktree)
+  if (seed) context.intentSeed = {
+    projectIntentSummary: seed.projectIntentSummary,
+    objectivesSummary: seed.objectivesSummary,
+    constraintsSummary: seed.constraintsSummary,
+    principlesGuidelinesSummary: seed.principlesGuidelinesSummary,
+    implementationStatusSummary: seed.implementationStatusSummary,
+    topObjectives: seed.topObjectives,
+    constraints: seed.constraints,
+    openQuestions: seed.openQuestions,
+    keyFiles: seed.keyFiles.map((file) => ({
+      path: file.path,
+      category: file.category,
+      whyImportant: file.whyImportant,
+    })),
+    categoryFindings: seed.categoryFindings,
+  }
   const result = await completeHidden({
     client: input.client,
     directory: input.directory,
+    hiddenSessionID: state.hiddenSessionID ?? hiddenByDir.get(input.directory),
     system: "Write only the user's next prompt. One short line. No tools.",
     prompt: renderSuggestionPrompt(context),
     modelSpec: config.inference.suggesterModel,
     smallModel: smallModelByDir.get(input.directory),
-    reuse: false,
+    reuse: true,
   })
-  let text = normalizeSuggestion(
+  state.hiddenSessionID = result.sessionID
+  hiddenByDir.set(input.directory, result.sessionID)
+  const text = normalizeSuggestion(
     result.text,
     config.suggestion.noSuggestionToken,
     config.suggestion.maxSuggestionChars,
   )
-  if (!text) text = fallbackSuggestion(context)
-  await appendLog(input.worktree, {
-    kind: text ? "suggestion.generated" : "suggestion.none",
-    sessionID: input.sessionID,
-    text,
-    raw: result.text.slice(0, 240),
-    users: context.recentUserPrompts.length,
-    assistantChars: context.latestAssistantTurn.length,
-  })
-  await publish(input.worktree, input.sessionID, text, state)
+  if (text !== instant) await publish(input.worktree, input.sessionID, text, state)
+  else await saveSessionState(input.worktree, input.sessionID, state)
   if (
     config.reseed.enabled &&
     (state.turnCount === 1 || state.turnCount % config.reseed.turnCheckInterval === 0)
@@ -97,8 +104,16 @@ export async function onUserMessage(input: {
   sessionID: string
   text: string
 }): Promise<void> {
+  if ([...hiddenByDir.values()].includes(input.sessionID)) return
   const config = await loadConfig(input.worktree)
   const state = await loadSessionState(input.worktree, input.sessionID)
+  if (state.hiddenSessionID === input.sessionID) return
+  await saveLive(input.worktree, {
+    sessionID: input.sessionID,
+    text: "",
+    status: "pending",
+    updatedAt: new Date().toISOString(),
+  })
   if (!state.lastSuggestion || !input.text.trim()) return
   const verdict = classifySteering(
     state.lastSuggestion,
@@ -114,39 +129,6 @@ export async function onUserMessage(input: {
   }
   state.steering = [...state.steering, event].slice(-config.steering.historyWindow)
   await saveSessionState(input.worktree, input.sessionID, state)
-  await appendLog(input.worktree, {
-    kind: "steering",
-    sessionID: input.sessionID,
-    steering: event.kind,
-    suggestedPrompt: event.suggestedPrompt,
-    actualUserPrompt: event.actualUserPrompt,
-    score: event.score,
-  })
-}
-
-export async function requestReseed(input: {
-  client: Client
-  directory: string
-  worktree: string
-  sessionID: string
-}): Promise<void> {
-  const config = await loadConfig(input.worktree)
-  await runReseed(input, config, { reason: "manual", changedFiles: [] })
-}
-
-export async function statusText(worktree: string, sessionID: string): Promise<string> {
-  const config = await loadConfig(worktree)
-  const seed = await loadSeed(worktree)
-  const state = await loadSessionState(worktree, sessionID)
-  return [
-    `enabled: ${config.enabled}`,
-    `suggester model: ${config.inference.suggesterModel}`,
-    `seeder model: ${config.inference.seederModel}`,
-    `last suggestion: ${state.lastSuggestion ?? "(none)"}`,
-    `seed: ${seed ? `${seed.generatedAt} (${seed.lastReseedReason ?? "unknown"})` : "(missing)"}`,
-    `usage: suggestions=${state.usage.suggestionCalls} seeders=${state.usage.seederCalls} seederSteps=${state.usage.seederSteps}`,
-    `steering events: ${state.steering.length}`,
-  ].join("\n")
 }
 
 function queueReseed(
@@ -162,8 +144,8 @@ function queueReseed(
       const trigger = await staleTrigger(input.directory, config, seed)
       if (!trigger) return
       await runReseed(input, config, trigger)
-    } catch (error) {
-      await appendLog(input.worktree, { kind: "seeder.failed", error: String(error) })
+    } catch {
+      // keep the last good seed
     } finally {
       reseeding.delete(key)
     }
@@ -176,7 +158,6 @@ async function runReseed(
   config: SuggesterConfig,
   trigger: Parameters<typeof runSeeder>[0]["trigger"],
 ): Promise<void> {
-  await appendLog(input.worktree, { kind: "seeder.start", reason: trigger.reason })
   const state = await loadSessionState(input.worktree, input.sessionID)
   const result = await runSeeder({
     client: input.client,
@@ -190,7 +171,6 @@ async function runReseed(
   state.usage = addUsage(state.usage, { seederCalls: 1, seederSteps: result.steps })
   await saveSeed(input.worktree, result.seed)
   await saveSessionState(input.worktree, input.sessionID, state)
-  await appendLog(input.worktree, { kind: "seeder.done", reason: trigger.reason, steps: result.steps })
 }
 
 async function publish(
@@ -198,6 +178,7 @@ async function publish(
   sessionID: string,
   text: string | null,
   state: Awaited<ReturnType<typeof loadSessionState>>,
+  opts?: { count?: boolean },
 ): Promise<void> {
   const live: LiveSuggestion = {
     sessionID,
@@ -206,19 +187,23 @@ async function publish(
     updatedAt: new Date().toISOString(),
   }
   state.lastSuggestion = text ?? undefined
-  if (text) state.usage = addUsage(state.usage, { suggestionCalls: 1, suggestionChars: text.length })
+  if (text && opts?.count !== false) {
+    state.usage = addUsage(state.usage, { suggestionCalls: 1, suggestionChars: text.length })
+  }
   await saveSessionState(worktree, sessionID, state)
   await saveLive(worktree, live)
 }
 
-function fallbackSuggestion(context: { latestAssistantTurn: string }): string {
+function fallbackSuggestion(context: {
+  latestAssistantTurn: string
+  unresolvedQuestions?: string[]
+}): string {
   const last = context.latestAssistantTurn.trim()
-  if (/restart|reload|try again|check/i.test(last)) return "Try the next real turn and tell me what you see."
+  if (context.unresolvedQuestions?.[0]) return "Yes."
+  if (/\?\s*$/.test(last)) return "Yes."
+  if (/restart|reload/i.test(last)) return "Restarted. What should I look for?"
+  if (/look|check|try/i.test(last)) return "Checking now."
   return "Go ahead."
-}
-
-function pending(sessionID: string): LiveSuggestion {
-  return { sessionID, text: "", status: "pending", updatedAt: new Date().toISOString() }
 }
 
 async function listMessages(client: Client, sessionID: string, directory: string): Promise<any[]> {
@@ -229,21 +214,16 @@ async function listMessages(client: Client, sessionID: string, directory: string
   return Array.isArray(result) ? result : []
 }
 
-async function getSession(
-  client: Client,
-  sessionID: string,
-  directory: string,
-): Promise<{ title?: string } | null> {
-  if (!client.session.get) return null
-  try {
-    return await sessionCall(client.session.get.bind(client.session), sessionID, { directory })
-  } catch {
-    return null
-  }
-}
-
 function inferTurnStatus(messages: any[]): TurnStatus {
   const latest = [...messages].reverse().find((message) => message?.info?.role === "assistant")
-  if (latest?.info?.error) return "error"
+  if (!latest) return "success"
+  const err = latest?.info?.error
+  if (err) {
+    const msg = typeof err === "string" ? err : err?.message ?? JSON.stringify(err)
+    if (/abort|cancel/i.test(msg)) return "aborted"
+    return "error"
+  }
+  const finish = latest?.info?.finishReason ?? latest?.info?.finish_reason
+  if (typeof finish === "string" && /abort|cancel/i.test(finish)) return "aborted"
   return "success"
 }

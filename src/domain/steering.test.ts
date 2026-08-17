@@ -25,4 +25,5 @@ test("similarity is 1 for identical", () => {
 test("normalize suggestion", () => {
   assert.equal(normalizeSuggestion("[no suggestion]", "[no suggestion]", 200), null)
   assert.equal(normalizeSuggestion("  Go ahead.  ", "[no suggestion]", 200), "Go ahead.")
+  assert.equal(normalizeSuggestion("ok test<|eos|>", "[no suggestion]", 200), "ok test")
 })

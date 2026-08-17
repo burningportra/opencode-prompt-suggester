@@ -1,7 +1,7 @@
 import type { SuggesterConfig } from "../domain/config.ts"
 import type { SeedArtifact } from "../domain/seed.ts"
 import type { SteeringEvent } from "../domain/steering.ts"
-import type { SuggestionPromptContext, TurnStatus } from "../domain/suggestion.ts"
+import { stripSpecialTokens, type SuggestionPromptContext, type TurnStatus } from "../domain/suggestion.ts"
 
 interface MessageBundle {
   info?: { role?: string; error?: unknown }
@@ -27,11 +27,11 @@ export function buildSuggestionContext(input: {
     .flatMap((message) => textOf(message))
     .filter(Boolean)
     .slice(-config.suggestion.maxRecentUserPrompts)
-    .map((text) => clip(text, config.suggestion.maxRecentUserPromptChars))
+    .map((text) => clip(stripSpecialTokens(text), config.suggestion.maxRecentUserPromptChars))
 
   const assistants = input.messages.filter((message) => message.info?.role === "assistant")
   const latest = assistants.at(-1)
-  const latestText = clip(textOf(latest).join("\n"), config.suggestion.maxAssistantTurnChars)
+  const latestText = clip(stripSpecialTokens(textOf(latest).join("\n")), config.suggestion.maxAssistantTurnChars)
 
   const toolSignals: string[] = []
   const touched = new Set<string>()
@@ -41,13 +41,10 @@ export function buildSuggestionContext(input: {
       if (part.type === "tool" && part.tool) {
         const title = part.state?.title ? ` ${part.state.title}` : ""
         toolSignals.push(clip(`${part.tool}${title}`, config.suggestion.maxToolSignalChars))
-        const file = firstString(part.state?.input, ["filePath", "path", "target"])
+        const file = firstString(part.state?.input, ["filePath", "path", "target", "file"])
         if (file) touched.add(file)
       }
       if (part.type === "text" && part.text) {
-        for (const match of part.text.match(/\?\s*$/gm) ?? []) {
-          void match
-        }
         for (const line of part.text.split("\n")) {
           if (line.trim().endsWith("?")) questions.push(clip(line.trim(), 180))
         }

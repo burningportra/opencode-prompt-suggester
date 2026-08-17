@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/domain/steering.test.ts"
+    "test": "node --experimental-strip-types --test src/tui.test.ts src/domain/steering.test.ts src/domain/seed.test.ts src/infra/sdk.test.ts src/app/context.test.ts"
   },
   "engines": {
     "opencode": ">=1.18.0"

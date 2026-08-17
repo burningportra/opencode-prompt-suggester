@@ -75,11 +75,18 @@ export async function runSeeder(input: {
       reuse: true,
     })
     hiddenSessionID = result.sessionID
-    const parsed = parseJsonObject(result.text) as {
+    let parsed: {
       type?: string
       tool?: string
       arguments?: Record<string, unknown>
       seed?: SeedDraft
+    }
+    try {
+      parsed = parseJsonObject(result.text) as typeof parsed
+    } catch (error) {
+      if (forced) throw new Error(`seeder final parse failed: ${describe(error)}`)
+      history.push({ modelResponse: result.text, toolResult: `parse error: ${describe(error)}` })
+      continue
     }
     if (parsed.type === "final" || forced) {
       const draft = parsed.seed
@@ -114,7 +121,12 @@ export async function runSeeder(input: {
       history.push({ modelResponse: result.text, toolResult: "invalid seeder payload" })
       continue
     }
-    const toolResult = await runSeederTool(input.directory, parsed.tool, parsed.arguments ?? {})
+    let toolResult: string
+    try {
+      toolResult = await runSeederTool(input.directory, parsed.tool, parsed.arguments ?? {})
+    } catch (error) {
+      toolResult = `tool error: ${describe(error)}`
+    }
     history.push({ modelResponse: result.text, toolResult })
   }
   throw new Error("seeder exhausted without a final seed")
@@ -237,7 +249,13 @@ async function grep(
   ignoreCase: boolean,
   limit: number,
 ): Promise<string[]> {
-  const regex = new RegExp(pattern, ignoreCase ? "i" : "")
+  let regex: RegExp
+  try {
+    regex = new RegExp(pattern, ignoreCase ? "i" : "")
+  } catch {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    regex = new RegExp(escaped, ignoreCase ? "i" : "")
+  }
   const files = await walk(start, root, "", 80)
   const hits: string[] = []
   for (const rel of files) {
@@ -262,4 +280,14 @@ function inside(root: string, target: string): boolean {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+function describe(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  try {
+    return JSON.stringify(error).slice(0, 200)
+  } catch {
+    return String(error)
+  }
 }

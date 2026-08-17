@@ -76,11 +76,11 @@ function previousSeedSummary(previousSeed: SeedArtifact | null): string {
       implementationStatusSummary: previousSeed.implementationStatusSummary,
       topObjectives: previousSeed.topObjectives,
       constraints: previousSeed.constraints,
-      keyFiles: previousSeed.keyFiles.map((file) => ({
+      keyFiles: previousSeed.keyFiles?.map((file) => ({
         path: file.path,
         category: file.category,
         whyImportant: file.whyImportant,
-      })),
+      })) ?? [],
       categoryFindings: previousSeed.categoryFindings,
     },
     null,

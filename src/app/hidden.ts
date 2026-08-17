@@ -20,7 +20,7 @@ export async function completeHidden(input: {
   smallModel?: string
   reuse?: boolean
 }): Promise<{ text: string; sessionID: string }> {
-  const sessionID = await ensureHiddenSession(
+  let sessionID = await ensureHiddenSession(
     input.client,
     input.reuse ? input.hiddenSessionID : undefined,
     input.directory,
@@ -29,7 +29,6 @@ export async function completeHidden(input: {
   const body: Record<string, unknown> = {
     system: input.system,
     parts: [{ type: "text", text: input.prompt }],
-    agent: "plan",
     tools: {
       bash: false,
       edit: false,
@@ -42,11 +41,21 @@ export async function completeHidden(input: {
     },
   }
   if (model) body.model = model
-  const result = await sessionCall(
-    input.client.session.prompt.bind(input.client.session),
-    sessionID,
-    { directory: input.directory, ...body },
-  )
+  let result: unknown
+  try {
+    result = await sessionCall(
+      input.client.session.prompt.bind(input.client.session),
+      sessionID,
+      { directory: input.directory, ...body },
+    )
+  } catch {
+    sessionID = await ensureHiddenSession(input.client, undefined, input.directory)
+    result = await sessionCall(
+      input.client.session.prompt.bind(input.client.session),
+      sessionID,
+      { directory: input.directory, ...body },
+    )
+  }
   if (!input.reuse && input.client.session.delete) {
     await sessionCall(input.client.session.delete.bind(input.client.session), sessionID, {
       directory: input.directory,
@@ -56,16 +65,7 @@ export async function completeHidden(input: {
 }
 
 async function ensureHiddenSession(client: Client, existing: string | undefined, directory: string): Promise<string> {
-  if (existing) {
-    try {
-      if (client.session.get) {
-        await sessionCall(client.session.get.bind(client.session), existing, { directory })
-      }
-      return existing
-    } catch {
-      // recreate
-    }
-  }
+  if (existing) return existing
   const created = await sdkCall<{ id?: string; sessionID?: string }>(
     client.session.create.bind(client.session),
     { body: { title: HIDDEN_SESSION_TITLE }, query: { directory } },

@@ -1,33 +1,28 @@
 /** @jsxImportSource @opentui/solid */
-import { readdir, writeFile } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import path from "node:path"
 import type { TuiPlugin, TuiPluginModule, TuiPromptRef } from "@opencode-ai/plugin/tui"
-import { loadConfig, loadLive, readJson, writeJson } from "./infra/store.ts"
+import { loadConfig, loadLive, loadSeed, readJson, saveConfig, saveSeed } from "./infra/store.ts"
 import { PLUGIN_ID, stateRoot } from "./infra/paths.ts"
 import type { LiveSuggestion } from "./domain/suggestion.ts"
-
-void writeFile(path.join(stateRoot(), "tui-module-load.txt"), `${new Date().toISOString()} eval\n`).catch(() => undefined)
 
 type KeyLike = {
   name?: string
   key?: string
   sequence?: string
   preventDefault?: () => void
-  stopPropagation?: () => void
 }
 
-const tui: TuiPlugin = async (api) => {
-  await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
-    ts: new Date().toISOString(),
-    phase: "boot",
-      rev: 29,
-  })
+type Field = { placeholder?: unknown }
 
+const tui: TuiPlugin = async (api) => {
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
   const solid = await import("solid-js").catch(() => undefined)
   const [ghost, setGhost] = solid?.createSignal("") ?? [() => "", (_: string) => undefined]
   let dismissed = ""
+  let submitted = false
   let promptRef: TuiPromptRef | undefined
+  let field: Field | undefined
 
   const sessionID = () => {
     const route = api.route.current
@@ -37,85 +32,53 @@ const tui: TuiPlugin = async (api) => {
 
   const typed = () => promptRef?.current.input ?? ""
 
-  const paintPlaceholder = (text: string) => {
+  const paint = (text: string) => {
     const renderer = api.renderer as {
-      root?: unknown
       currentFocusedRenderable?: unknown
-      focusedRenderable?: unknown
       requestRender?: () => void
     }
-    const rootsToWalk = [renderer.currentFocusedRenderable, renderer.focusedRenderable, renderer.root, renderer]
-    const seen = new Set<unknown>()
-    let painted = 0
-    const visit = (node: unknown) => {
-      if (!node || typeof node !== "object" || seen.has(node)) return
-      seen.add(node)
-      const rec = node as {
-        placeholder?: unknown
-        editorView?: { setPlaceholderStyledText?: (chunks: unknown) => void }
-        getChildren?: () => unknown[]
-        children?: unknown[]
-        childNodes?: unknown[]
-      }
-      const isField = "placeholder" in rec || Boolean(rec.editorView?.setPlaceholderStyledText)
-      if (isField) {
-        rec.placeholder = text || null
-        painted += 1
-      }
-      const kids = rec.getChildren?.() ?? rec.children ?? rec.childNodes ?? []
-      if (Array.isArray(kids)) for (const kid of kids) visit(kid)
-    }
-    for (const node of rootsToWalk) visit(node)
+    const node = renderer.currentFocusedRenderable as Field | undefined
+    if (node && "placeholder" in node) field = node
+    if (!field) return
+    field.placeholder = text || null
     renderer.requestRender?.()
-    return painted
+  }
+
+  const clearGhost = () => {
+    setGhost("")
+    paint("")
   }
 
   const accept = () => {
     const text = ghost()
     if (!text || !promptRef) return false
     promptRef.set({ input: text, parts: [] })
-    setGhost("")
-    paintPlaceholder("")
+    clearGhost()
     return true
   }
 
   const refresh = async () => {
     const id = sessionID()
     const live = await findLive(roots, id)
-    await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
-      ts: new Date().toISOString(),
-      phase: "poll",
-    rev: 29,
-      sessionID: id ?? "",
-      live: live?.text ?? "",
-      status: live?.status ?? "missing",
-      painted: ghost() && !typed().trim() ? paintPlaceholder(ghost()) : 0,
-    }).catch(() => undefined)
-    const root = roots[0]
-    if (root) {
-      const config = await loadConfig(root)
-      if (!config.enabled) {
-        setGhost("")
-        paintPlaceholder("")
-        return
-      }
+    if (submitted || !live || live.status !== "ready" || !live.text || live.text === dismissed) {
+      if (ghost()) clearGhost()
+      return
     }
-    if (!live || live.status !== "ready" || !live.text) return
     if (id && live.sessionID !== id) return
-    if (live.text === dismissed) return
     setGhost(live.text)
-    if (!typed().trim()) paintPlaceholder(live.text)
+    if (!typed().trim()) paint(live.text)
   }
 
   api.event.on("session.idle", () => {
     dismissed = ""
+    submitted = false
     void refresh()
   })
   const poll = setInterval(() => {
     void refresh()
     if (ghost() && (typed() === " " || typed() === "\t")) accept()
-    if (ghost() && !typed().trim()) paintPlaceholder(ghost())
-  }, 16)
+    else if (!submitted && ghost() && !typed().trim()) paint(ghost())
+  }, 200)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
   const keymap = (api as { keymap?: { intercept?: (fn: (evt: KeyLike) => unknown) => () => void } }).keymap
@@ -130,8 +93,7 @@ const tui: TuiPlugin = async (api) => {
     if ((name === "backspace" || name === "delete") && ghost()) {
       evt.preventDefault?.()
       dismissed = ghost()
-      setGhost("")
-      paintPlaceholder("")
+      clearGhost()
       return true
     }
   })
@@ -154,17 +116,86 @@ const tui: TuiPlugin = async (api) => {
           sessionID: props.session_id,
           visible: props.visible,
           disabled: props.disabled,
-          onSubmit: props.on_submit,
+          onSubmit: () => {
+            dismissed = ghost() || dismissed
+            submitted = true
+            clearGhost()
+            props.on_submit?.()
+          },
           showPlaceholder: !text,
           ref: (ref) => {
             promptRef = ref
             props.ref?.(ref)
-            if (text) queueMicrotask(() => paintPlaceholder(text))
+            if (text) queueMicrotask(() => paint(text))
           },
         })
       },
     },
   } as never)
+
+  api.command?.register?.(() => [
+    {
+      title: "Suggester: Settings & Status",
+      value: "suggester",
+      category: "Suggester",
+      description: "View status and configure prompt suggester",
+      slash: { name: "suggester" },
+      onSelect: async () => {
+        const root = roots[0]
+        if (!root) return
+        const cfg = await loadConfig(root)
+        const live = await findLive(roots, sessionID())
+        const seed = await loadSeed(root)
+        api.ui.toast({
+          variant: "info",
+          title: "Suggester Status",
+          message: `Enabled: ${cfg.enabled} | Model: ${cfg.inference.suggesterModel} | Seed: ${seed ? "ready" : "none"} | Current: ${live?.text || "(none)"}`,
+        })
+      },
+    },
+    {
+      title: "Suggester: Enable",
+      value: "suggester.on",
+      category: "Suggester",
+      description: "Enable prompt suggestions",
+      slash: { name: "suggester on", aliases: ["suggester:on"] },
+      onSelect: async () => {
+        const root = roots[0]
+        if (root) await saveConfig(root, "project", { enabled: true })
+        api.ui.toast({ variant: "success", message: "Prompt suggester enabled" })
+        void refresh()
+      },
+    },
+    {
+      title: "Suggester: Disable",
+      value: "suggester.off",
+      category: "Suggester",
+      description: "Disable prompt suggestions",
+      slash: { name: "suggester off", aliases: ["suggester:off"] },
+      onSelect: async () => {
+        const root = roots[0]
+        if (root) await saveConfig(root, "project", { enabled: false })
+        clearGhost()
+        api.ui.toast({ variant: "info", message: "Prompt suggester disabled" })
+      },
+    },
+    {
+      title: "Suggester: Reseed Project Intent",
+      value: "suggester.reseed",
+      category: "Suggester",
+      description: "Trigger fresh intent re-seeding",
+      slash: { name: "suggester reseed", aliases: ["suggester:reseed"] },
+      onSelect: async () => {
+        const root = roots[0]
+        if (root) {
+          const { unlink } = await import("node:fs/promises")
+          const { seedPath } = await import("./infra/paths.ts")
+          await unlink(seedPath(root)).catch(() => undefined)
+        }
+        api.ui.toast({ variant: "info", message: "Project intent seed reset; will reseed next turn." })
+      },
+    },
+  ])
 
   void refresh()
 }
@@ -175,11 +206,10 @@ async function findLive(roots: string[], sessionID?: string): Promise<LiveSugges
     if (live) return live
   }
   if (!sessionID) return null
-  const base = stateRoot()
-  const projects = await readdir(path.join(base, "projects")).catch(() => [])
+  const projects = await readdir(path.join(stateRoot(), "projects")).catch(() => [])
   for (const project of projects) {
     const live = await readJson<LiveSuggestion>(
-      path.join(base, "projects", project, "sessions", sessionID, "live.json"),
+      path.join(stateRoot(), "projects", project, "sessions", sessionID, "live.json"),
     )
     if (live) return live
   }

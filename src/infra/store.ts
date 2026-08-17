@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { mergeConfig, type SuggesterConfig } from "../domain/config.ts"
+import { mergeConfig, type PartialSuggesterConfig, type SuggesterConfig } from "../domain/config.ts"
 import type { SeedArtifact } from "../domain/seed.ts"
 import type { SteeringEvent } from "../domain/steering.ts"
 import type { LiveSuggestion } from "../domain/suggestion.ts"
@@ -28,19 +28,19 @@ export async function writeJson(file: string, value: unknown): Promise<void> {
 }
 
 export async function loadConfig(worktree: string, stateOverride?: string): Promise<SuggesterConfig> {
-  const user = await readJson<Partial<SuggesterConfig>>(userConfigPath(stateOverride))
-  const project = await readJson<Partial<SuggesterConfig>>(projectConfigPath(worktree, stateOverride))
+  const user = await readJson<PartialSuggesterConfig>(userConfigPath(stateOverride))
+  const project = await readJson<PartialSuggesterConfig>(projectConfigPath(worktree, stateOverride))
   return mergeConfig(user ?? undefined, project ?? undefined)
 }
 
 export async function saveConfig(
   worktree: string,
   scope: "user" | "project",
-  patch: Partial<SuggesterConfig>,
+  patch: PartialSuggesterConfig,
   stateOverride?: string,
 ): Promise<SuggesterConfig> {
   const file = scope === "user" ? userConfigPath(stateOverride) : projectConfigPath(worktree, stateOverride)
-  const current = (await readJson<Partial<SuggesterConfig>>(file)) ?? {}
+  const current = (await readJson<PartialSuggesterConfig>(file)) ?? {}
   const next = mergeConfig(current, patch)
   await writeJson(file, next)
   return loadConfig(worktree, stateOverride)

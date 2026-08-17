@@ -40,6 +40,16 @@ export interface SuggesterConfig {
   }
 }
 
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends Array<infer U>
+    ? Array<U>
+    : T[P] extends object
+      ? DeepPartial<T[P]>
+      : T[P]
+}
+
+export type PartialSuggesterConfig = DeepPartial<SuggesterConfig>
+
 export const DEFAULT_CONFIG: SuggesterConfig = {
   schemaVersion: 1,
   enabled: true,
@@ -48,9 +58,9 @@ export const DEFAULT_CONFIG: SuggesterConfig = {
     maxSteps: 8,
   },
   reseed: {
-    enabled: true,
-    checkOnSessionStart: true,
-    checkAfterEveryTurn: true,
+    enabled: false,
+    checkOnSessionStart: false,
+    checkAfterEveryTurn: false,
     turnCheckInterval: 10,
   },
   suggestion: {
@@ -81,7 +91,7 @@ export const DEFAULT_CONFIG: SuggesterConfig = {
 }
 
 export function mergeConfig(
-  ...layers: Array<Partial<SuggesterConfig> | undefined>
+  ...layers: Array<DeepPartial<SuggesterConfig> | undefined>
 ): SuggesterConfig {
   let result: SuggesterConfig = structuredClone(DEFAULT_CONFIG)
   for (const layer of layers) {

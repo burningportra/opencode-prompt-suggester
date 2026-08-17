@@ -14,22 +14,16 @@ function renderChangedExamples(
 
 export function renderSuggestionPrompt(context: SuggestionPromptContext): string {
   const intentSeed = context.intentSeed
-    ? JSON.stringify(
-        {
-          projectIntentSummary: context.intentSeed.projectIntentSummary,
-          objectivesSummary: context.intentSeed.objectivesSummary,
-          constraintsSummary: context.intentSeed.constraintsSummary,
-          principlesGuidelinesSummary: context.intentSeed.principlesGuidelinesSummary,
-          implementationStatusSummary: context.intentSeed.implementationStatusSummary,
-          topObjectives: context.intentSeed.topObjectives,
-          constraints: context.intentSeed.constraints,
-          openQuestions: context.intentSeed.openQuestions,
-          keyFiles: context.intentSeed.keyFiles,
-          categoryFindings: context.intentSeed.categoryFindings,
-        },
-        null,
-        2,
-      )
+    ? JSON.stringify({
+        projectIntentSummary: clip(context.intentSeed.projectIntentSummary, 220),
+        objectivesSummary: clip(context.intentSeed.objectivesSummary, 180),
+        constraintsSummary: clip(context.intentSeed.constraintsSummary, 180),
+        implementationStatusSummary: clip(context.intentSeed.implementationStatusSummary, 180),
+        topObjectives: context.intentSeed.topObjectives?.slice(0, 3) ?? [],
+        constraints: context.intentSeed.constraints?.slice(0, 3) ?? [],
+        openQuestions: context.intentSeed.openQuestions?.slice(0, 3) ?? [],
+        keyFiles: (context.intentSeed.keyFiles ?? []).slice(0, 4).map((file) => file.path),
+      })
     : "none"
 
   return `Write the next message the user would most likely send in this OpenCode session.
@@ -87,4 +81,10 @@ Guidance:
 - If nothing new needs to be added, prefer affirmation only.
 - If the assistant's direction clearly conflicts with the user's recent behavior or ProjectIntent, write a natural pivot instead.
 - Keep the result under ${context.maxSuggestionChars} characters. Prefer fewer when possible.`
+}
+
+function clip(text: string | undefined, max: number): string {
+  const value = (text ?? "").trim()
+  if (value.length <= max) return value
+  return `${value.slice(0, Math.max(0, max - 1)).trimEnd()}…`
 }

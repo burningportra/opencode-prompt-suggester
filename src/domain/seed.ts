@@ -100,7 +100,9 @@ export function validateSeedDraft(draft: SeedDraft): string | null {
     const finding = findings[key]
     if (!finding) return `missing categoryFindings.${key}`
     if (!finding.rationale?.trim()) return `empty rationale for ${key}`
-    if (finding.found && finding.files.length === 0) return `${key} marked found without files`
+    if (finding.found && (!Array.isArray(finding.files) || finding.files.length === 0)) {
+      return `${key} marked found without files`
+    }
   }
   return null
 }
