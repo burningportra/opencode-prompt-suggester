@@ -1,6 +1,6 @@
 # opencode-prompt-suggester
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/burningportra/opencode-prompt-suggester/releases/tag/v0.1.1)
+[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](https://github.com/burningportra/opencode-prompt-suggester/releases/tag/v0.1.2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![OpenCode](https://img.shields.io/badge/OpenCode-%3E%3D1.18.0-orange.svg)](https://opencode.ai)
 

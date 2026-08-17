@@ -1,6 +1,6 @@
 {
   "name": "opencode-prompt-suggester",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Intent-aware next-prompt ghost suggestions for OpenCode",
   "license": "MIT",
   "type": "module",

@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.2] - 2026-08-17
+
+### Documentation
+- Completely overhauled `README.md` following open-source documentation standards.
+- Added TL;DR section with problem/solution breakdown and feature matrix.
+- Added ASCII data flow architecture diagram mapping lifecycle from `session.idle` to TUI prompt injection.
+- Added comparison table vs vanilla OpenCode and static snippet alternatives.
+- Added full commented configuration reference covering seed, reseed, suggestion, steering, and inference settings.
+- Added comprehensive troubleshooting guide and FAQ covering top usage scenarios.
+- Added formal contributions policy and license attribution.
+
+---
+
 ## [v0.1.1] - 2026-08-17
 
 ### Added
