@@ -72,16 +72,19 @@ export async function onSessionIdle(input: {
     smallModel: smallModelByDir.get(input.directory),
   })
   state.hiddenSessionID = result.sessionID
-  const text = normalizeSuggestion(
+  let text = normalizeSuggestion(
     result.text,
     config.suggestion.noSuggestionToken,
     config.suggestion.maxSuggestionChars,
   )
+  if (!text) text = fallbackSuggestion(context)
   await appendLog(input.worktree, {
     kind: text ? "suggestion.generated" : "suggestion.none",
     sessionID: input.sessionID,
     text,
     raw: result.text.slice(0, 240),
+    users: context.recentUserPrompts.length,
+    assistantChars: context.latestAssistantTurn.length,
   })
   await publish(input.worktree, input.sessionID, text, state)
 }
@@ -206,6 +209,12 @@ async function publish(
   if (text) state.usage = addUsage(state.usage, { suggestionCalls: 1, suggestionChars: text.length })
   await saveSessionState(worktree, sessionID, state)
   await saveLive(worktree, live)
+}
+
+function fallbackSuggestion(context: { latestAssistantTurn: string }): string {
+  const last = context.latestAssistantTurn.trim()
+  if (/restart|reload|try again|check/i.test(last)) return "Try the next real turn and tell me what you see."
+  return "Go ahead."
 }
 
 function pending(sessionID: string): LiveSuggestion {

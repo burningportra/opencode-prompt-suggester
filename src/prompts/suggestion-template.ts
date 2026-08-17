@@ -37,7 +37,7 @@ export function renderSuggestionPrompt(context: SuggestionPromptContext): string
 Return only the user's message text.
 Do not explain.
 Do not describe the instructions you were given.
-If no plausible next user message is clear, return exactly ${context.noSuggestionToken}.
+Always write a next user message. Only return exactly ${context.noSuggestionToken} if the user clearly said they are done, goodbye, or stop.
 
 TurnStatus:
 ${context.turnStatus}

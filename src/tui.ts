@@ -46,6 +46,9 @@ const tui: TuiPlugin = async (api) => {
     const live = await loadLive(worktree)
     if (!live || (sessionID && live.sessionID !== sessionID)) return
     current = live.status === "ready" ? live.text : ""
+    if (live.status === "ready" && live.text && live.text !== applied) {
+      api.ui.toast({ message: `Suggestion: ${live.text}`, variant: "info", duration: 4000 })
+    }
   }
 
   await refreshConfig()
@@ -64,10 +67,14 @@ const tui: TuiPlugin = async (api) => {
     return true
   }
 
-  const prefill = () => {
+  const prefill = async () => {
     if (!enabled || !current || current === applied) return
-    if (!promptRef || promptRef.current.input.trim()) return
-    promptRef.set({ input: current, parts: [] })
+    if (promptRef?.current.input.trim()) return
+    if (promptRef) promptRef.set({ input: current, parts: [] })
+    const tui = api.client as { tui?: { appendPrompt?: (args: unknown) => Promise<unknown> } }
+    if (!promptRef && tui.tui?.appendPrompt) {
+      await tui.tui.appendPrompt({ text: current })
+    }
     applied = current
   }
 
