@@ -1,0 +1,112 @@
+export type GhostAcceptKey = "space" | "right" | "tab"
+
+export interface SuggesterConfig {
+  schemaVersion: number
+  enabled: boolean
+  seed: {
+    maxDiffChars: number
+    maxSteps: number
+  }
+  reseed: {
+    enabled: boolean
+    checkOnSessionStart: boolean
+    checkAfterEveryTurn: boolean
+    turnCheckInterval: number
+  }
+  suggestion: {
+    noSuggestionToken: string
+    customInstruction: string
+    fastPathContinueOnError: boolean
+    ghostAcceptKeys: GhostAcceptKey[]
+    maxAssistantTurnChars: number
+    maxRecentUserPrompts: number
+    maxRecentUserPromptChars: number
+    maxToolSignals: number
+    maxToolSignalChars: number
+    maxTouchedFiles: number
+    maxUnresolvedQuestions: number
+    maxAbortContextChars: number
+    maxSuggestionChars: number
+    prefillOnlyWhenEditorEmpty: boolean
+  }
+  steering: {
+    historyWindow: number
+    acceptedThreshold: number
+    maxChangedExamples: number
+  }
+  inference: {
+    seederModel: string
+    suggesterModel: string
+  }
+}
+
+export const DEFAULT_CONFIG: SuggesterConfig = {
+  schemaVersion: 1,
+  enabled: true,
+  seed: {
+    maxDiffChars: 3000,
+    maxSteps: 8,
+  },
+  reseed: {
+    enabled: true,
+    checkOnSessionStart: true,
+    checkAfterEveryTurn: true,
+    turnCheckInterval: 10,
+  },
+  suggestion: {
+    noSuggestionToken: "[no suggestion]",
+    customInstruction: "",
+    fastPathContinueOnError: true,
+    ghostAcceptKeys: ["right", "tab"],
+    maxAssistantTurnChars: 100000,
+    maxRecentUserPrompts: 20,
+    maxRecentUserPromptChars: 500,
+    maxToolSignals: 8,
+    maxToolSignalChars: 240,
+    maxTouchedFiles: 8,
+    maxUnresolvedQuestions: 6,
+    maxAbortContextChars: 280,
+    maxSuggestionChars: 200,
+    prefillOnlyWhenEditorEmpty: true,
+  },
+  steering: {
+    historyWindow: 20,
+    acceptedThreshold: 0.82,
+    maxChangedExamples: 3,
+  },
+  inference: {
+    seederModel: "session-default",
+    suggesterModel: "small",
+  },
+}
+
+export function mergeConfig(
+  ...layers: Array<Partial<SuggesterConfig> | undefined>
+): SuggesterConfig {
+  let result: SuggesterConfig = structuredClone(DEFAULT_CONFIG)
+  for (const layer of layers) {
+    if (!layer) continue
+    result = {
+      ...result,
+      ...layer,
+      seed: { ...result.seed, ...layer.seed },
+      reseed: { ...result.reseed, ...layer.reseed },
+      suggestion: { ...result.suggestion, ...layer.suggestion },
+      steering: { ...result.steering, ...layer.steering },
+      inference: { ...result.inference, ...layer.inference },
+    }
+  }
+  return result
+}
+
+export function configFingerprint(config: SuggesterConfig): string {
+  return JSON.stringify({
+    seed: config.seed,
+    reseed: config.reseed,
+    suggestion: {
+      customInstruction: config.suggestion.customInstruction,
+      maxSuggestionChars: config.suggestion.maxSuggestionChars,
+    },
+    inference: config.inference,
+  })
+}

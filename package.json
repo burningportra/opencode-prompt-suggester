@@ -1,0 +1,41 @@
+{
+  "name": "opencode-prompt-suggester",
+  "version": "0.1.0",
+  "description": "Intent-aware next-prompt ghost suggestions for OpenCode",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kevtrinh/opencode-prompt-suggester.git"
+  },
+  "exports": {
+    "./server": "./src/server.ts",
+    "./tui": "./src/tui.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/domain/steering.test.ts"
+  },
+  "engines": {
+    "opencode": ">=1.18.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.4.3",
+    "@types/node": "^22.13.9",
+    "typescript": "^5.8.2"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "prompt-suggester",
+    "ghost-text"
+  ]
+}
