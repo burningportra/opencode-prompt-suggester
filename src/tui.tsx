@@ -20,7 +20,7 @@ const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-    rev: 26,
+    rev: 28,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
@@ -91,7 +91,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-    rev: 27,
+      rev: 28,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
@@ -161,8 +161,7 @@ const tui: TuiPlugin = async (api) => {
           visible: props.visible,
           disabled: props.disabled,
           onSubmit: props.on_submit,
-          showPlaceholder: true,
-          placeholders: text ? { normal: [text] } : undefined,
+          showPlaceholder: !text,
           ref: (ref) => {
             promptRef = ref
             props.ref?.(ref)
