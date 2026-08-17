@@ -56,7 +56,16 @@ const tui: TuiPlugin = async (api) => {
         childNodes?: unknown[]
       }
       if ("placeholder" in rec && typeof rec.placeholder === "string") {
-        rec.placeholder = text
+        try {
+          Object.defineProperty(rec, "placeholder", {
+            configurable: true,
+            enumerable: true,
+            get: () => text,
+            set: () => undefined,
+          })
+        } catch {
+          rec.placeholder = text
+        }
         painted += 1
       }
       const kids = rec.getChildren?.() ?? rec.children ?? rec.childNodes ?? []
@@ -82,7 +91,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-      rev: 26,
+    rev: 27,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
