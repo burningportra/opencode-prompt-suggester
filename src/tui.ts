@@ -1,11 +1,15 @@
-import { readdir } from "node:fs/promises"
+import { readdir, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { createSignal } from "solid-js"
 import type { TuiPlugin, TuiPluginModule, TuiPromptRef } from "@opencode-ai/plugin/tui"
 import { requestReseed, statusText } from "./app/suggester.ts"
 import { loadConfig, loadLive, readJson, saveConfig, writeJson } from "./infra/store.ts"
 import { PLUGIN_ID, stateRoot } from "./infra/paths.ts"
 import type { LiveSuggestion } from "./domain/suggestion.ts"
+
+void writeFile(
+  path.join(stateRoot(), "tui-module-load.txt"),
+  `${new Date().toISOString()} module-evaluated\n`,
+).catch(() => undefined)
 
 type KeyLike = {
   name?: string
@@ -16,9 +20,11 @@ type KeyLike = {
 }
 
 const tui: TuiPlugin = async (api) => {
-  await writeHeartbeat(api, { phase: "boot", rev: 13 })
+  await writeHeartbeat(api, { phase: "boot", rev: 14 })
+  const createSignal = await loadSignal()
+  await writeHeartbeat(api, { phase: "signal", rev: 14, solid: createSignal.solid })
   const roots = unique([api.state.path.worktree, api.state.path.directory])
-  const [ghost, setGhost] = createSignal("")
+  const [ghost, setGhost] = createSignal.fn("")
   let promptRef: TuiPromptRef | undefined
   let dismissed = ""
 
@@ -198,6 +204,21 @@ async function writeHeartbeat(
     ts: new Date().toISOString(),
     ...extra,
   }).catch(() => undefined)
+}
+
+async function loadSignal(): Promise<{ fn: typeof import("solid-js")["createSignal"]; solid: boolean }> {
+  try {
+    const solid = await import("solid-js")
+    return { fn: solid.createSignal, solid: true }
+  } catch {
+    return {
+      solid: false,
+      fn: ((init: unknown) => {
+        let value = init
+        return [() => value, (next: unknown) => { value = next }]
+      }) as typeof import("solid-js")["createSignal"],
+    }
+  }
 }
 
 function unique(values: Array<string | undefined>) {
