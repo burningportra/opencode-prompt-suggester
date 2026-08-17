@@ -9,7 +9,10 @@
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node"],
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/tui.tsx"]
 }

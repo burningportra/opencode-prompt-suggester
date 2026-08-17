@@ -5,7 +5,7 @@ import { normalizeSuggestion, type LiveSuggestion, type TurnStatus } from "../do
 import { addUsage } from "../domain/usage.ts"
 import { appendLog, loadConfig, loadSeed, loadSessionState, saveLive, saveSeed, saveSessionState } from "../infra/store.ts"
 import { HIDDEN_SESSION_TITLE } from "../infra/paths.ts"
-import { sdkCall, sessionCall } from "../infra/sdk.ts"
+import { sessionCall } from "../infra/sdk.ts"
 import { renderSuggestionPrompt } from "../prompts/suggestion-template.ts"
 import { buildSuggestionContext } from "./context.ts"
 import { completeHidden } from "./hidden.ts"
@@ -83,7 +83,6 @@ export async function onSessionIdle(input: {
     assistantChars: context.latestAssistantTurn.length,
   })
   await publish(input.worktree, input.sessionID, text, state)
-  if (text) await pushToPrompt(input.client, text)
   if (
     config.reseed.enabled &&
     (state.turnCount === 1 || state.turnCount % config.reseed.turnCheckInterval === 0)
@@ -210,26 +209,6 @@ async function publish(
   if (text) state.usage = addUsage(state.usage, { suggestionCalls: 1, suggestionChars: text.length })
   await saveSessionState(worktree, sessionID, state)
   await saveLive(worktree, live)
-}
-
-async function pushToPrompt(client: Client, text: string): Promise<void> {
-  if (!client.tui?.appendPrompt) return
-  try {
-    await sdkCall(
-      client.tui.appendPrompt.bind(client.tui),
-      { text },
-      { body: { text } },
-    )
-    if (client.tui.showToast) {
-      await sdkCall(
-        client.tui.showToast.bind(client.tui),
-        { message: `Suggestion: ${text}`, variant: "info", duration: 4000 },
-        { body: { message: `Suggestion: ${text}`, variant: "info", duration: 4000 } },
-      )
-    }
-  } catch {
-    // prompt may be focused/busy
-  }
 }
 
 function fallbackSuggestion(context: { latestAssistantTurn: string }): string {

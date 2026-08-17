@@ -10,7 +10,7 @@
   },
   "exports": {
     "./server": "./src/server.ts",
-    "./tui": "./src/tui.ts"
+    "./tui": "./src/tui.tsx"
   },
   "files": [
     "src",

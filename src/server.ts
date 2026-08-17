@@ -2,7 +2,7 @@ import type { Plugin, PluginModule } from "@opencode-ai/plugin"
 import { onSessionIdle, onUserMessage, rememberSmallModel } from "./app/suggester.ts"
 import { PLUGIN_ID } from "./infra/paths.ts"
 
-const PLUGIN_REVISION = 4
+const PLUGIN_REVISION = 5
 
 const server: Plugin = async ({ client, directory, worktree, project }) => {
   const root = worktree || project?.worktree || directory
