@@ -5,7 +5,7 @@ import { normalizeSuggestion, type LiveSuggestion, type TurnStatus } from "../do
 import { addUsage } from "../domain/usage.ts"
 import { appendLog, loadConfig, loadSeed, loadSessionState, saveLive, saveSeed, saveSessionState } from "../infra/store.ts"
 import { HIDDEN_SESSION_TITLE } from "../infra/paths.ts"
-import { sessionCall } from "../infra/sdk.ts"
+import { sdkCall, sessionCall } from "../infra/sdk.ts"
 import { renderSuggestionPrompt } from "../prompts/suggestion-template.ts"
 import { buildSuggestionContext } from "./context.ts"
 import { completeHidden } from "./hidden.ts"
@@ -15,6 +15,10 @@ type Client = Parameters<typeof completeHidden>[0]["client"] & {
   session: Parameters<typeof completeHidden>[0]["client"]["session"] & {
     messages?: (...args: never[]) => Promise<unknown>
     get?: (...args: never[]) => Promise<unknown>
+  }
+  tui?: {
+    appendPrompt?: (...args: never[]) => Promise<unknown>
+    showToast?: (...args: never[]) => Promise<unknown>
   }
 }
 
@@ -87,6 +91,7 @@ export async function onSessionIdle(input: {
     assistantChars: context.latestAssistantTurn.length,
   })
   await publish(input.worktree, input.sessionID, text, state)
+  if (text) await pushToPrompt(input.client, text)
 }
 
 export async function onUserMessage(input: {
@@ -209,6 +214,26 @@ async function publish(
   if (text) state.usage = addUsage(state.usage, { suggestionCalls: 1, suggestionChars: text.length })
   await saveSessionState(worktree, sessionID, state)
   await saveLive(worktree, live)
+}
+
+async function pushToPrompt(client: Client, text: string): Promise<void> {
+  if (!client.tui?.appendPrompt) return
+  try {
+    await sdkCall(
+      client.tui.appendPrompt.bind(client.tui),
+      { text },
+      { body: { text } },
+    )
+    if (client.tui.showToast) {
+      await sdkCall(
+        client.tui.showToast.bind(client.tui),
+        { message: `Suggestion: ${text}`, variant: "info", duration: 4000 },
+        { body: { message: `Suggestion: ${text}`, variant: "info", duration: 4000 } },
+      )
+    }
+  } catch {
+    // prompt may be focused/busy
+  }
 }
 
 function fallbackSuggestion(context: { latestAssistantTurn: string }): string {

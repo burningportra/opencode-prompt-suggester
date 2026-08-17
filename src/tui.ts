@@ -70,11 +70,6 @@ const tui: TuiPlugin = async (api) => {
   const prefill = async () => {
     if (!enabled || !current || current === applied) return
     if (promptRef?.current.input.trim()) return
-    if (promptRef) promptRef.set({ input: current, parts: [] })
-    const tui = api.client as { tui?: { appendPrompt?: (args: unknown) => Promise<unknown> } }
-    if (!promptRef && tui.tui?.appendPrompt) {
-      await tui.tui.appendPrompt({ text: current })
-    }
     applied = current
   }
 
