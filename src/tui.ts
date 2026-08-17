@@ -77,7 +77,7 @@ const tui: TuiPlugin = async (api) => {
   keymap?.intercept?.((evt) => {
     const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
     if (typed()) return
-    if ((name === "right" || name === "arrowright" || name === "tab") && ghost()) {
+    if ((name === "right" || name === "arrowright" || name === "tab" || name === "space" || name === " ") && ghost()) {
       evt.preventDefault?.()
       accept()
       return true
