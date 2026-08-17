@@ -20,7 +20,7 @@ const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-    rev: 25,
+    rev: 26,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
@@ -38,26 +38,33 @@ const tui: TuiPlugin = async (api) => {
   const typed = () => promptRef?.current.input ?? ""
 
   const paintPlaceholder = (text: string) => {
-    const rootsToWalk = [api.renderer, (api.renderer as { root?: unknown }).root]
+    const renderer = api.renderer as {
+      root?: unknown
+      currentFocusedRenderable?: unknown
+      requestRender?: () => void
+    }
+    const rootsToWalk = [renderer, renderer.root, renderer.currentFocusedRenderable]
     const seen = new Set<unknown>()
+    let painted = 0
     const visit = (node: unknown) => {
       if (!node || typeof node !== "object" || seen.has(node)) return
       seen.add(node)
       const rec = node as {
-        placeholder?: string
-        constructor?: { name?: string }
+        placeholder?: unknown
         getChildren?: () => unknown[]
         children?: unknown[]
         childNodes?: unknown[]
       }
-      const name = rec.constructor?.name ?? ""
-      if ("placeholder" in rec && /textarea/i.test(name)) {
+      if ("placeholder" in rec && typeof rec.placeholder === "string") {
         rec.placeholder = text
+        painted += 1
       }
       const kids = rec.getChildren?.() ?? rec.children ?? rec.childNodes ?? []
       if (Array.isArray(kids)) for (const kid of kids) visit(kid)
     }
     for (const node of rootsToWalk) visit(node)
+    renderer.requestRender?.()
+    return painted
   }
 
   const accept = () => {
@@ -75,10 +82,11 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-      rev: 25,
+      rev: 26,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
+      painted: ghost() && !typed().trim() ? paintPlaceholder(ghost()) : 0,
     }).catch(() => undefined)
     const root = roots[0]
     if (root) {
@@ -144,7 +152,8 @@ const tui: TuiPlugin = async (api) => {
           visible: props.visible,
           disabled: props.disabled,
           onSubmit: props.on_submit,
-          showPlaceholder: !text,
+          showPlaceholder: true,
+          placeholders: text ? { normal: [text] } : undefined,
           ref: (ref) => {
             promptRef = ref
             props.ref?.(ref)
