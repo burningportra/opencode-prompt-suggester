@@ -1,9 +1,10 @@
 /** @jsxImportSource @opentui/solid */
 import { readdir, writeFile } from "node:fs/promises"
 import path from "node:path"
-import type { TuiPlugin, TuiPluginModule, TuiPromptRef } from "@opencode-ai/plugin/tui"
+import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { loadConfig, loadLive, readJson, writeJson } from "./infra/store.ts"
 import { PLUGIN_ID, stateRoot } from "./infra/paths.ts"
+import { sessionCall } from "./infra/sdk.ts"
 import type { LiveSuggestion } from "./domain/suggestion.ts"
 
 void writeFile(path.join(stateRoot(), "tui-module-load.txt"), `${new Date().toISOString()} eval\n`).catch(() => undefined)
@@ -16,18 +17,28 @@ type KeyLike = {
   stopPropagation?: () => void
 }
 
+type Field = {
+  plainText?: string
+  insertText?: (text: string) => void
+  clear?: () => void
+  setText?: (text: string) => void
+}
+
+const ACCEPT = new Set(["space", " ", "right", "arrowright", "tab"])
+const DISMISS = new Set(["backspace", "delete"])
+
 const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-      rev: 22,
+    rev: 23,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
   const solid = await import("solid-js").catch(() => undefined)
   const [ghost, setGhost] = solid?.createSignal("") ?? [() => "", (_: string) => undefined]
   let dismissed = ""
-  let promptRef: TuiPromptRef | undefined
+  let field: Field | undefined
 
   const sessionID = () => {
     const route = api.route.current
@@ -35,14 +46,29 @@ const tui: TuiPlugin = async (api) => {
     return undefined
   }
 
-  const typed = () => promptRef?.current.input ?? ""
+  const typed = () => field?.plainText ?? ""
 
   const accept = () => {
     const text = ghost()
-    if (!text || !promptRef) return false
-    promptRef.set({ input: text, parts: [] })
+    if (!text || typed().trim()) return false
+    field?.insertText?.(text)
+    field?.setText?.(text)
     setGhost("")
     return true
+  }
+
+  const send = async (text: string) => {
+    const id = sessionID()
+    const value = text.trim()
+    if (!id || !value) return
+    setGhost("")
+    field?.clear?.()
+    field?.setText?.("")
+    const client = api.client as { session: { prompt: (...args: never[]) => Promise<unknown> } }
+    await sessionCall(client.session.prompt.bind(client.session), id, {
+      directory: api.state.path.directory,
+      parts: [{ type: "text", text: value }],
+    })
   }
 
   const refresh = async () => {
@@ -51,7 +77,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-    rev: 22,
+      rev: 23,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
@@ -67,6 +93,7 @@ const tui: TuiPlugin = async (api) => {
     if (!live || live.status !== "ready" || !live.text) return
     if (id && live.sessionID !== id) return
     if (live.text === dismissed) return
+    if (typed().trim()) return
     setGhost(live.text)
   }
 
@@ -84,12 +111,12 @@ const tui: TuiPlugin = async (api) => {
   keymap?.intercept?.((evt) => {
     if (typed()) return
     const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-    if ((name === "space" || name === " " || name === "right" || name === "arrowright" || name === "tab") && ghost()) {
+    if (ACCEPT.has(name) && ghost()) {
       evt.preventDefault?.()
       accept()
       return true
     }
-    if ((name === "backspace" || name === "delete") && ghost()) {
+    if (DISMISS.has(name) && ghost()) {
       evt.preventDefault?.()
       dismissed = ghost()
       setGhost("")
@@ -103,33 +130,53 @@ const tui: TuiPlugin = async (api) => {
       session_prompt(
         _ctx: unknown,
         props: {
-          session_id: string
           visible?: boolean
-          disabled?: boolean
           on_submit?: () => void
-          ref?: (ref: TuiPromptRef | undefined) => void
         },
       ) {
-        const text = ghost()
         const theme = api.theme.current
         return (
-          <box width="100%">
-            {text ? (
-              <box width="100%" paddingLeft={2} paddingBottom={0}>
-                <text fg={theme.textMuted}>{text}</text>
-              </box>
-            ) : null}
-            {api.ui.Prompt({
-              sessionID: props.session_id,
-              visible: props.visible,
-              disabled: props.disabled,
-              onSubmit: props.on_submit,
-              showPlaceholder: !text,
-              ref: (ref) => {
-                promptRef = ref
-                props.ref?.(ref)
-              },
-            })}
+          <box width="100%" visible={props.visible !== false}>
+            <box
+              width="100%"
+              paddingLeft={2}
+              paddingRight={2}
+              paddingTop={1}
+              paddingBottom={1}
+              backgroundColor={theme.backgroundElement}
+            >
+              <textarea
+                width="100%"
+                minHeight={1}
+                maxHeight={8}
+                placeholder={ghost() || undefined}
+                placeholderColor={theme.textMuted}
+                textColor={theme.text}
+                focusedTextColor={theme.text}
+                focusedBackgroundColor={theme.backgroundElement}
+                cursorColor={theme.text}
+                onKeyDown={(evt: KeyLike) => {
+                  if (typed()) return
+                  const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
+                  if (ACCEPT.has(name) && ghost()) {
+                    evt.preventDefault?.()
+                    accept()
+                  }
+                  if (DISMISS.has(name) && ghost()) {
+                    evt.preventDefault?.()
+                    dismissed = ghost()
+                    setGhost("")
+                  }
+                }}
+                onSubmit={() => {
+                  void send(typed() || ghost())
+                  props.on_submit?.()
+                }}
+                ref={(node: Field) => {
+                  field = node
+                }}
+              />
+            </box>
           </box>
         )
       },
