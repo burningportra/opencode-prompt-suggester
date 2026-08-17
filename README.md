@@ -1,6 +1,6 @@
 # opencode-prompt-suggester
 
-Next-prompt ghost suggestions for [OpenCode](https://opencode.ai). After a turn finishes, a cheap model drafts the message you are most likely to type next and shows it as empty-box placeholder text. Right or Tab accepts.
+Next-prompt ghost suggestions for [OpenCode](https://opencode.ai). After a turn finishes, a cheap model drafts the message you are most likely to type next and shows it as empty-box placeholder text. Space or Right arrow accepts.
 
 Independent OpenCode port of the [pi-prompt-suggester](https://github.com/guwidoe/pi-prompt-suggester) architecture (MIT). Not affiliated.
 
@@ -25,7 +25,7 @@ Both lists are required. TUI plugins are not auto-scanned from `plugins/`. Resta
 ## Use
 
 - After the assistant goes idle, the empty prompt shows a muted suggestion.
-- Right or Tab accepts when the box is empty.
+- Space or Right arrow accepts when the box is empty.
 - `/suggester` opens settings (enable/disable, instruction, status).
 - `/suggester reseed` refreshes project intent.
 - `/suggester off` / `/suggester on` toggles generation.

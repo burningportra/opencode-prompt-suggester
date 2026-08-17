@@ -76,21 +76,87 @@ const tui: TuiPlugin = async (api) => {
   })
   const poll = setInterval(() => {
     void refresh()
-    if (ghost() && (typed() === " " || typed() === "\t")) accept()
+    if (ghost() && typed() === " ") accept()
     else if (!submitted && ghost() && !typed().trim()) paint(ghost())
-  }, 200)
+  }, 100)
   api.lifecycle.onDispose(() => clearInterval(poll))
+
+  const isRightArrowSeq = (str: string): boolean => {
+    return (
+      str === "\x1b[C" ||
+      str === "\x1bOC" ||
+      str === "\x1b[1;5C" ||
+      str === "\x1b[1;2C" ||
+      str === "\x1b[1;3C" ||
+      str === "\x1b[1;4C" ||
+      str === "\x1b[5C" ||
+      str.includes("\x1b[C") ||
+      str.includes("\x1bOC")
+    )
+  }
+
+  const isDismissSeq = (str: string): boolean => {
+    return str === "\x7f" || str === "\x08" || str === "\x1b[3~"
+  }
+
+  if (typeof process !== "undefined" && process.stdin?.on) {
+    const onStdin = (chunk: Buffer | string) => {
+      if (typed().trim()) return
+      const str = typeof chunk === "string" ? chunk : chunk.toString("utf8")
+      if (isRightArrowSeq(str) && ghost()) {
+        accept()
+      } else if (isDismissSeq(str) && ghost()) {
+        dismissed = ghost()
+        clearGhost()
+      }
+    }
+    process.stdin.on("data", onStdin)
+    api.lifecycle.onDispose(() => {
+      process.stdin.off("data", onStdin)
+    })
+  }
+
+  const isAcceptKey = (evt: KeyLike) => {
+    const name = String(evt.name ?? "").toLowerCase()
+    const key = String(evt.key ?? "").toLowerCase()
+    const seq = String(evt.sequence ?? "")
+    return (
+      name === "space" ||
+      name === " " ||
+      name === "right" ||
+      name === "arrowright" ||
+      name === "arrow_right" ||
+      key === " " ||
+      key === "space" ||
+      key === "right" ||
+      key === "arrowright" ||
+      seq === " " ||
+      isRightArrowSeq(seq)
+    )
+  }
+
+  const isDismissKey = (evt: KeyLike) => {
+    const name = String(evt.name ?? "").toLowerCase()
+    const key = String(evt.key ?? "").toLowerCase()
+    const seq = String(evt.sequence ?? "")
+    return (
+      name === "backspace" ||
+      name === "delete" ||
+      key === "backspace" ||
+      key === "delete" ||
+      isDismissSeq(seq)
+    )
+  }
 
   const keymap = (api as { keymap?: { intercept?: (fn: (evt: KeyLike) => unknown) => () => void } }).keymap
   keymap?.intercept?.((evt) => {
     if (typed()) return
-    const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-    if ((name === "space" || name === " " || name === "right" || name === "arrowright" || name === "tab") && ghost()) {
+    if (isAcceptKey(evt) && ghost()) {
       evt.preventDefault?.()
       accept()
       return true
     }
-    if ((name === "backspace" || name === "delete") && ghost()) {
+    if (isDismissKey(evt) && ghost()) {
       evt.preventDefault?.()
       dismissed = ghost()
       clearGhost()

@@ -1,4 +1,4 @@
-export type GhostAcceptKey = "space" | "right" | "tab"
+export type GhostAcceptKey = "space" | "right"
 
 export interface SuggesterConfig {
   schemaVersion: number
@@ -67,7 +67,7 @@ export const DEFAULT_CONFIG: SuggesterConfig = {
     noSuggestionToken: "[no suggestion]",
     customInstruction: "",
     fastPathContinueOnError: true,
-    ghostAcceptKeys: ["space", "right", "tab"],
+    ghostAcceptKeys: ["space", "right"],
     maxAssistantTurnChars: 1800,
     maxRecentUserPrompts: 5,
     maxRecentUserPromptChars: 180,
