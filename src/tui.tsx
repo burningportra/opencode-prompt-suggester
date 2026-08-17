@@ -1,10 +1,9 @@
 /** @jsxImportSource @opentui/solid */
 import { readdir, writeFile } from "node:fs/promises"
 import path from "node:path"
-import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import type { TuiPlugin, TuiPluginModule, TuiPromptRef } from "@opencode-ai/plugin/tui"
 import { loadConfig, loadLive, readJson, writeJson } from "./infra/store.ts"
 import { PLUGIN_ID, stateRoot } from "./infra/paths.ts"
-import { sessionCall } from "./infra/sdk.ts"
 import type { LiveSuggestion } from "./domain/suggestion.ts"
 
 void writeFile(path.join(stateRoot(), "tui-module-load.txt"), `${new Date().toISOString()} eval\n`).catch(() => undefined)
@@ -17,28 +16,18 @@ type KeyLike = {
   stopPropagation?: () => void
 }
 
-type Field = {
-  plainText?: string
-  insertText?: (text: string) => void
-  clear?: () => void
-  setText?: (text: string) => void
-}
-
-const ACCEPT = new Set(["space", " ", "right", "arrowright", "tab"])
-const DISMISS = new Set(["backspace", "delete"])
-
 const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-    rev: 23,
+    rev: 25,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
   const solid = await import("solid-js").catch(() => undefined)
   const [ghost, setGhost] = solid?.createSignal("") ?? [() => "", (_: string) => undefined]
   let dismissed = ""
-  let field: Field | undefined
+  let promptRef: TuiPromptRef | undefined
 
   const sessionID = () => {
     const route = api.route.current
@@ -46,29 +35,38 @@ const tui: TuiPlugin = async (api) => {
     return undefined
   }
 
-  const typed = () => field?.plainText ?? ""
+  const typed = () => promptRef?.current.input ?? ""
+
+  const paintPlaceholder = (text: string) => {
+    const rootsToWalk = [api.renderer, (api.renderer as { root?: unknown }).root]
+    const seen = new Set<unknown>()
+    const visit = (node: unknown) => {
+      if (!node || typeof node !== "object" || seen.has(node)) return
+      seen.add(node)
+      const rec = node as {
+        placeholder?: string
+        constructor?: { name?: string }
+        getChildren?: () => unknown[]
+        children?: unknown[]
+        childNodes?: unknown[]
+      }
+      const name = rec.constructor?.name ?? ""
+      if ("placeholder" in rec && /textarea/i.test(name)) {
+        rec.placeholder = text
+      }
+      const kids = rec.getChildren?.() ?? rec.children ?? rec.childNodes ?? []
+      if (Array.isArray(kids)) for (const kid of kids) visit(kid)
+    }
+    for (const node of rootsToWalk) visit(node)
+  }
 
   const accept = () => {
     const text = ghost()
-    if (!text || typed().trim()) return false
-    field?.insertText?.(text)
-    field?.setText?.(text)
+    if (!text || !promptRef) return false
+    promptRef.set({ input: text, parts: [] })
     setGhost("")
+    paintPlaceholder("")
     return true
-  }
-
-  const send = async (text: string) => {
-    const id = sessionID()
-    const value = text.trim()
-    if (!id || !value) return
-    setGhost("")
-    field?.clear?.()
-    field?.setText?.("")
-    const client = api.client as { session: { prompt: (...args: never[]) => Promise<unknown> } }
-    await sessionCall(client.session.prompt.bind(client.session), id, {
-      directory: api.state.path.directory,
-      parts: [{ type: "text", text: value }],
-    })
   }
 
   const refresh = async () => {
@@ -77,7 +75,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-      rev: 23,
+      rev: 25,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
@@ -87,14 +85,15 @@ const tui: TuiPlugin = async (api) => {
       const config = await loadConfig(root)
       if (!config.enabled) {
         setGhost("")
+        paintPlaceholder("")
         return
       }
     }
     if (!live || live.status !== "ready" || !live.text) return
     if (id && live.sessionID !== id) return
     if (live.text === dismissed) return
-    if (typed().trim()) return
     setGhost(live.text)
+    if (!typed().trim()) paintPlaceholder(live.text)
   }
 
   api.event.on("session.idle", () => {
@@ -104,6 +103,7 @@ const tui: TuiPlugin = async (api) => {
   const poll = setInterval(() => {
     void refresh()
     if (ghost() && (typed() === " " || typed() === "\t")) accept()
+    if (ghost() && !typed().trim()) paintPlaceholder(ghost())
   }, 80)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
@@ -111,15 +111,16 @@ const tui: TuiPlugin = async (api) => {
   keymap?.intercept?.((evt) => {
     if (typed()) return
     const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-    if (ACCEPT.has(name) && ghost()) {
+    if ((name === "space" || name === " " || name === "right" || name === "arrowright" || name === "tab") && ghost()) {
       evt.preventDefault?.()
       accept()
       return true
     }
-    if (DISMISS.has(name) && ghost()) {
+    if ((name === "backspace" || name === "delete") && ghost()) {
       evt.preventDefault?.()
       dismissed = ghost()
       setGhost("")
+      paintPlaceholder("")
       return true
     }
   })
@@ -130,55 +131,26 @@ const tui: TuiPlugin = async (api) => {
       session_prompt(
         _ctx: unknown,
         props: {
+          session_id: string
           visible?: boolean
+          disabled?: boolean
           on_submit?: () => void
+          ref?: (ref: TuiPromptRef | undefined) => void
         },
       ) {
-        const theme = api.theme.current
-        return (
-          <box width="100%" visible={props.visible !== false}>
-            <box
-              width="100%"
-              paddingLeft={2}
-              paddingRight={2}
-              paddingTop={1}
-              paddingBottom={1}
-              backgroundColor={theme.backgroundElement}
-            >
-              <textarea
-                width="100%"
-                minHeight={1}
-                maxHeight={8}
-                placeholder={ghost() || undefined}
-                placeholderColor={theme.textMuted}
-                textColor={theme.text}
-                focusedTextColor={theme.text}
-                focusedBackgroundColor={theme.backgroundElement}
-                cursorColor={theme.text}
-                onKeyDown={(evt: KeyLike) => {
-                  if (typed()) return
-                  const name = String(evt.name ?? evt.key ?? evt.sequence ?? "").toLowerCase()
-                  if (ACCEPT.has(name) && ghost()) {
-                    evt.preventDefault?.()
-                    accept()
-                  }
-                  if (DISMISS.has(name) && ghost()) {
-                    evt.preventDefault?.()
-                    dismissed = ghost()
-                    setGhost("")
-                  }
-                }}
-                onSubmit={() => {
-                  void send(typed() || ghost())
-                  props.on_submit?.()
-                }}
-                ref={(node: Field) => {
-                  field = node
-                }}
-              />
-            </box>
-          </box>
-        )
+        const text = ghost()
+        return api.ui.Prompt({
+          sessionID: props.session_id,
+          visible: props.visible,
+          disabled: props.disabled,
+          onSubmit: props.on_submit,
+          showPlaceholder: !text,
+          ref: (ref) => {
+            promptRef = ref
+            props.ref?.(ref)
+            if (text) queueMicrotask(() => paintPlaceholder(text))
+          },
+        })
       },
     },
   } as never)
