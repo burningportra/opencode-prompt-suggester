@@ -20,7 +20,7 @@ const tui: TuiPlugin = async (api) => {
   await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
     ts: new Date().toISOString(),
     phase: "boot",
-    rev: 28,
+      rev: 29,
   })
 
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
@@ -41,9 +41,10 @@ const tui: TuiPlugin = async (api) => {
     const renderer = api.renderer as {
       root?: unknown
       currentFocusedRenderable?: unknown
+      focusedRenderable?: unknown
       requestRender?: () => void
     }
-    const rootsToWalk = [renderer, renderer.root, renderer.currentFocusedRenderable]
+    const rootsToWalk = [renderer.currentFocusedRenderable, renderer.focusedRenderable, renderer.root, renderer]
     const seen = new Set<unknown>()
     let painted = 0
     const visit = (node: unknown) => {
@@ -51,21 +52,14 @@ const tui: TuiPlugin = async (api) => {
       seen.add(node)
       const rec = node as {
         placeholder?: unknown
+        editorView?: { setPlaceholderStyledText?: (chunks: unknown) => void }
         getChildren?: () => unknown[]
         children?: unknown[]
         childNodes?: unknown[]
       }
-      if ("placeholder" in rec && typeof rec.placeholder === "string") {
-        try {
-          Object.defineProperty(rec, "placeholder", {
-            configurable: true,
-            enumerable: true,
-            get: () => text,
-            set: () => undefined,
-          })
-        } catch {
-          rec.placeholder = text
-        }
+      const isField = "placeholder" in rec || Boolean(rec.editorView?.setPlaceholderStyledText)
+      if (isField) {
+        rec.placeholder = text || null
         painted += 1
       }
       const kids = rec.getChildren?.() ?? rec.children ?? rec.childNodes ?? []
@@ -91,7 +85,7 @@ const tui: TuiPlugin = async (api) => {
     await writeJson(path.join(stateRoot(), "tui-heartbeat.json"), {
       ts: new Date().toISOString(),
       phase: "poll",
-      rev: 28,
+    rev: 29,
       sessionID: id ?? "",
       live: live?.text ?? "",
       status: live?.status ?? "missing",
@@ -121,7 +115,7 @@ const tui: TuiPlugin = async (api) => {
     void refresh()
     if (ghost() && (typed() === " " || typed() === "\t")) accept()
     if (ghost() && !typed().trim()) paintPlaceholder(ghost())
-  }, 80)
+  }, 16)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
   const keymap = (api as { keymap?: { intercept?: (fn: (evt: KeyLike) => unknown) => () => void } }).keymap
