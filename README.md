@@ -88,39 +88,87 @@ opencode
 
 ## Installation
 
-Both the server plugin (`opencode.json`) and TUI plugin (`tui.json`) must be configured.
+OpenCode plugins operate across two runtimes: the background server engine (`opencode.json`) and the interactive terminal UI (`tui.json`). Both configuration files must reference the plugin.
 
-### Local Installation (Recommended)
+### Option 1: 1-Line Quick Install (macOS / Linux)
 
-Clone the repository to your local machine:
+Run this command in your terminal to clone the plugin and automatically register it in both `opencode.json` and `tui.json`:
 
 ```bash
-git clone https://github.com/burningportra/opencode-prompt-suggester.git ~/.config/opencode/plugins/opencode-prompt-suggester
-```
-
-Add the plugin to your OpenCode configuration files:
-
-```jsonc
-// ~/.config/opencode/opencode.json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "file:///Users/YOUR_USERNAME/.config/opencode/plugins/opencode-prompt-suggester"
-  ]
+git clone https://github.com/burningportra/opencode-prompt-suggester.git ~/.config/opencode/plugins/opencode-prompt-suggester && \
+node -e '
+const fs = require("fs"), path = require("path"), os = require("os");
+const pluginPath = "file://" + path.join(os.homedir(), ".config", "opencode", "plugins", "opencode-prompt-suggester");
+for (const file of ["opencode.json", "tui.json"]) {
+  const p = path.join(os.homedir(), ".config", "opencode", file);
+  const cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
+  cfg.plugin = Array.from(new Set([...(cfg.plugin || []), pluginPath]));
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
 }
+console.log("✓ opencode-prompt-suggester installed and configured in ~/.config/opencode/");
+'
 ```
 
-```jsonc
-// ~/.config/opencode/tui.json
-{
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": [
-    "file:///Users/YOUR_USERNAME/.config/opencode/plugins/opencode-prompt-suggester"
-  ]
-}
+---
+
+### Option 2: Manual Configuration
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/burningportra/opencode-prompt-suggester.git ~/.config/opencode/plugins/opencode-prompt-suggester
+   ```
+
+2. **Add to `~/.config/opencode/opencode.json`**:
+   ```jsonc
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "plugin": [
+       "file:///Users/YOUR_USERNAME/.config/opencode/plugins/opencode-prompt-suggester"
+     ]
+   }
+   ```
+
+3. **Add to `~/.config/opencode/tui.json`**:
+   ```jsonc
+   {
+     "$schema": "https://opencode.ai/tui.json",
+     "plugin": [
+       "file:///Users/YOUR_USERNAME/.config/opencode/plugins/opencode-prompt-suggester"
+     ]
+   }
+   ```
+
+*(Replace `/Users/YOUR_USERNAME/` with your actual home directory path).*
+
+---
+
+### Option 3: Per-Project Installation
+
+To enable prompt suggestions for a specific repository only:
+
+1. Clone or add the plugin submodule to your repository.
+2. In your repo root, add the relative or absolute path to `.opencode/opencode.json`:
+   ```jsonc
+   {
+     "plugin": [
+       "file:///path/to/opencode-prompt-suggester"
+     ]
+   }
+   ```
+3. Add the path to `~/.config/opencode/tui.json` for interactive TUI rendering.
+
+---
+
+### Verifying Installation
+
+Restart OpenCode and type:
+
+```text
+/suggester
 ```
 
-Restart OpenCode.
+You should see an info toast confirming that the plugin is loaded and active.
 
 ---
 
