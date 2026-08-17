@@ -2,6 +2,8 @@
 
 Next-prompt ghost suggestions for [OpenCode](https://opencode.ai). After a turn finishes, a cheap model drafts the message you are most likely to type next and shows it as empty-box placeholder text. Space or Right arrow accepts.
 
+![opencode-prompt-suggester demo](./demo.gif)
+
 Independent OpenCode port of the [pi-prompt-suggester](https://github.com/guwidoe/pi-prompt-suggester) architecture (MIT). Not affiliated.
 
 ## Install

@@ -1,6 +1,6 @@
 {
   "name": "opencode-prompt-suggester",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Intent-aware next-prompt ghost suggestions for OpenCode",
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,9 @@
   "files": [
     "src",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "demo.gif"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
