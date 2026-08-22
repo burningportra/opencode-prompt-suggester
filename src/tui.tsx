@@ -13,8 +13,6 @@ type KeyLike = {
   preventDefault?: () => void
 }
 
-type Field = { placeholder?: unknown }
-
 const tui: TuiPlugin = async (api) => {
   const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
   const solid = await import("solid-js").catch(() => undefined)
@@ -22,7 +20,6 @@ const tui: TuiPlugin = async (api) => {
   let dismissed = ""
   let submitted = false
   let promptRef: TuiPromptRef | undefined
-  let field: Field | undefined
 
   const sessionID = () => {
     const route = api.route.current
@@ -32,21 +29,8 @@ const tui: TuiPlugin = async (api) => {
 
   const typed = () => promptRef?.current.input ?? ""
 
-  const paint = (text: string) => {
-    const renderer = api.renderer as {
-      currentFocusedRenderable?: unknown
-      requestRender?: () => void
-    }
-    const node = renderer.currentFocusedRenderable as Field | undefined
-    if (node && "placeholder" in node) field = node
-    if (!field) return
-    field.placeholder = text || null
-    renderer.requestRender?.()
-  }
-
   const clearGhost = () => {
     setGhost("")
-    paint("")
   }
 
   const accept = () => {
@@ -66,7 +50,6 @@ const tui: TuiPlugin = async (api) => {
     }
     if (id && live.sessionID !== id) return
     setGhost(live.text)
-    if (!typed().trim()) paint(live.text)
   }
 
   api.event.on("session.idle", () => {
@@ -77,7 +60,6 @@ const tui: TuiPlugin = async (api) => {
   const poll = setInterval(() => {
     void refresh()
     if (ghost() && typed() === " ") accept()
-    else if (!submitted && ghost() && !typed().trim()) paint(ghost())
   }, 100)
   api.lifecycle.onDispose(() => clearInterval(poll))
 
@@ -188,11 +170,11 @@ const tui: TuiPlugin = async (api) => {
             clearGhost()
             props.on_submit?.()
           },
-          showPlaceholder: !text,
+          showPlaceholder: true,
+          placeholders: text ? { normal: [text] } : undefined,
           ref: (ref) => {
             promptRef = ref
             props.ref?.(ref)
-            if (text) queueMicrotask(() => paint(text))
           },
         })
       },

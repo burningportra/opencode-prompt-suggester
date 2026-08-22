@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.3] - 2026-08-21
+
+### Fixed
+- Fixed ghost suggestions not rendering in the prompt box. The TUI previously toggled `showPlaceholder` off whenever a suggestion was ready and tried to force the placeholder through the renderer internals; it now uses the first-class `placeholders` prop (`{ normal: [text] }`) so the ghost renders natively and reliably.
+- Removed the fragile `renderer.currentFocusedRenderable` mutation and the 100ms re-paint loop.
+
+---
+
 ## [v0.1.2] - 2026-08-17
 
 ### Documentation
