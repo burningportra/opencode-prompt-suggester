@@ -1,206 +1,123 @@
 # opencode-prompt-suggester
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](https://github.com/burningportra/opencode-prompt-suggester/releases/tag/v0.1.2)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/burningportra/opencode-prompt-suggester)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![OpenCode](https://img.shields.io/badge/OpenCode-%3E%3D1.18.0-orange.svg)](https://opencode.ai)
+[![OpenCode](https://img.shields.io/badge/OpenCode-%3E%3D2.0.0-orange.svg)](https://opencode.ai)
 
-> **Intent-aware next-prompt ghost suggestions for OpenCode.** After a turn finishes, an instant heuristic + background model drafts the message you are most likely to send next and displays it as ghost placeholder text in the prompt box. **Space** or **Right Arrow** accepts.
+> **Intent-aware next-prompt suggestions for OpenCode V2, in the TUI and Desktop.**
+> After a turn finishes, an instant heuristic plus a background model draft the
+> message you are most likely to send next and show it as ghost text in the
+> composer. Accept it with one key, or start typing to ignore it.
 
 ![opencode-prompt-suggester demo](./demo.gif)
 
 Independent OpenCode port of the [pi-prompt-suggester](https://github.com/guwidoe/pi-prompt-suggester) architecture (MIT). Not affiliated with OpenCode.
 
-```jsonc
-// ~/.config/opencode/opencode.json & ~/.config/opencode/tui.json
-{
-  "plugin": ["file:///path/to/opencode-prompt-suggester"]
-}
-```
+---
+
+## What changed in 2.0
+
+Version 2.0 is a port to the OpenCode V2 plugin API:
+
+- Uses `Plugin.define`, `ctx.event.subscribe`, `ctx.session.hook`, and RPC
+  instead of V1 client and `chat.message` plumbing.
+- Generates suggestions with the stateless
+  `ctx.experimental.generate.text` API. There are no hidden
+  `[prompt-suggester]` sessions, so nothing is written to session history.
+- Ships a V2 server part, a TUI part, an RPC contract, and a Desktop
+  `gui-experimental` bundle.
+- Keeps the existing seed, steering, usage, and prompt-template engine and the
+  on-disk state layout.
+- TUI shows a suggestion bar above the composer. Desktop shows faint ghost text
+  in the empty composer.
 
 ---
 
-## TL;DR
+## Behavior
 
-### The Problem
-Working with conversational coding agents involves repetitive follow-ups ("Yes.", "Go ahead.", "Run the tests.", "Fix the type error."). Typing these manually adds friction, breaks flow, and forces you to stare at an empty input box deciding how to prompt the next step.
+- **TUI**
+  - A `↳ <suggestion>` line appears above the composer.
+  - `ctrl+alt+n` submits the suggestion through the normal composer path, so
+    the selected agent, model, and attachments are preserved.
+  - `ctrl+alt+x` dismisses it.
+  - With the `ui.prompt` host patch applied, `space` / `right` insert the
+    suggestion into the composer, and `backspace` dismisses it.
+  - `/suggester` shows status, `/suggester on`, `/suggester off`, and
+    `/suggester reseed` manage the plugin.
+- **Desktop**
+  - The suggestion appears as faint ghost text in the empty composer.
+  - `tab` inserts it so you can edit it.
+  - `enter` submits it through the normal composer path.
+  - `escape` dismisses it.
+  - `/suggester` supports the same `on`, `off`, `reseed`, and `refresh`
+    arguments.
 
-### The Solution
-`opencode-prompt-suggester` runs immediately when OpenCode finishes an assistant turn. It renders an instant heuristic fallback in `<1ms`, streams an intent-grounded suggestion in the background, and displays it directly in the empty prompt placeholder. Pressing **Space** or **Right Arrow** immediately accepts the text into the editor.
-
-### Why Use opencode-prompt-suggester?
-
-| Feature | What It Does | Why It Matters |
-|---|---|---|
-| **Ghost Text Placeholder** | Renders suggestions directly inside the empty prompt input | Zero visual clutter; disappears instantly when you start typing |
-| **Instant Heuristic Fallback** | Generates zero-latency suggestions (`Yes.`, `Go ahead.`) immediately | No waiting for API round-trips to keep moving |
-| **Repo Intent Seeding** | Agentic explorer analyzes repo vision, architecture, and principles | Suggestions stay aligned with real project goals |
-| **Adaptive Steering** | Tracks accepted, edited, and rejected suggestions | Learns user intent and avoids repeating rejected directions |
-| **Hidden Session Isolation** | Runs all inference in background `[prompt-suggester]` sessions | Never pollutes active chat history or context windows |
-| **Native Ergonomics** | **Space** or **Right Arrow** accepts; **Tab** preserved for mode switching | Works seamlessly with native terminal keybindings |
-
----
-
-## Quick Example
-
-```bash
-# 1. Start OpenCode in your repository
-opencode
-
-# 2. Ask OpenCode to perform a task
-> "Add a health check endpoint to src/server.ts"
-
-# 3. OpenCode finishes the turn:
-# Assistant: "I added the /healthz route. Should I run the test suite now?"
-
-# 4. The empty prompt immediately displays ghost suggestion:
-# [ Yes. Run the test suite. ]
-
-# 5. Press Right Arrow (or Space) to accept into the prompt box
-# > Yes. Run the test suite._
-
-# 6. Press Enter to execute!
-```
-
----
-
-## Design Philosophy
-
-1. **Zero Latency Over Perfection**: An instant heuristic suggestion is painted immediately upon turn completion so you never wait on network inference. The LLM suggestion seamlessly replaces it when ready.
-2. **Grounded Project Intent**: Prompts should not be generic autocomplete. The seeder agent explores key files, guidelines, and active task state to suggest contextually relevant next steps.
-3. **Total Chat Isolation**: Background suggestions must never inject synthetic turns or extra messages into your primary conversation history.
-4. **Unobtrusive Terminal Ergonomics**: Suggestions live inside the empty prompt placeholder. Typing any character immediately overrides the ghost text without extra keystrokes.
-5. **Adaptive Steering**: Every accepted, edited, or rejected suggestion is recorded as a steering signal, refining future recommendations in the current session.
-
----
-
-## Comparison
-
-| Capability | Vanilla OpenCode | Static Snippets / Aliases | opencode-prompt-suggester |
-|---|:---:|:---:|:---:|
-| **Next-Turn Guidance** | ❌ Manual typing | ⚠️ Fixed static text | ✅ Context-aware dynamic suggestions |
-| **Project Intent Awareness** | ❌ None | ❌ None | ✅ Background repo exploration |
-| **Keyboard Acceptance** | ❌ None | ⚠️ Manual snippet expansion | ✅ Single keystroke (`Space` / `Right`) |
-| **Chat History Hygiene** | ✅ Clean | ✅ Clean | ✅ Clean (isolated hidden sessions) |
-| **Zero-Latency Response** | ❌ N/A | ✅ Instant | ✅ Instant heuristic + LLM refinement |
-| **Error / Abort Handling** | ❌ Manual | ❌ Static | ✅ Auto-pivots on aborts & errors |
+Suggestions are generated after `session.execution.succeeded`, failed, or
+interrupted events and are cleared when the next execution starts. Subagent
+sessions are ignored.
 
 ---
 
 ## Installation
 
-OpenCode plugins operate across two runtimes: the background server engine (`opencode.json`) and the interactive terminal UI (`tui.json`). Both configuration files must reference the plugin.
-
-### Option 1: 1-Line Quick Install (macOS / Linux)
-
-Run this command in your terminal to clone the plugin and automatically register it in both `opencode.json` and `tui.json`:
+Clone the plugin into OpenCode's plugin directory:
 
 ```bash
-git clone https://github.com/burningportra/opencode-prompt-suggester.git ~/.config/opencode/plugins/opencode-prompt-suggester && \
-node -e '
-const fs = require("fs"), path = require("path"), os = require("os");
-const pluginPath = "file://" + path.join(os.homedir(), ".config", "opencode", "plugins", "opencode-prompt-suggester");
-for (const file of ["opencode.json", "tui.json"]) {
-  const p = path.join(os.homedir(), ".config", "opencode", file);
-  const cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
-  cfg.plugin = Array.from(new Set([...(cfg.plugin || []), pluginPath]));
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
-}
-console.log("✓ opencode-prompt-suggester installed and configured in ~/.config/opencode/");
-'
+git clone https://github.com/burningportra/opencode-prompt-suggester.git \
+  ~/.config/opencode/plugins/opencode-prompt-suggester
 ```
 
----
+Add it to `~/.config/opencode/opencode.json`:
 
-### Option 2: Manual Configuration
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "./plugins/opencode-prompt-suggester"
+    }
+  ]
+}
+```
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/burningportra/opencode-prompt-suggester.git ~/.config/opencode/plugins/opencode-prompt-suggester
-   ```
+Use `"package": "opencode-prompt-suggester"` instead when installing from npm.
 
-2. **Add to `~/.config/opencode/opencode.json`**:
-   ```jsonc
-   {
-     "$schema": "https://opencode.ai/config.json",
-     "plugin": [
-       "file:///Users/YOUR_USERNAME/.config/opencode/plugins/opencode-prompt-suggester"
-     ]
-   }
-   ```
+The server and TUI parts are loaded from `src/`. Build the Desktop bundle after
+changing `src/gui.tsx`:
 
-3. **Add to `~/.config/opencode/tui.json`**:
-   ```jsonc
-   {
-     "$schema": "https://opencode.ai/tui.json",
-     "plugin": [
-       "file:///Users/YOUR_USERNAME/.config/opencode/plugins/opencode-prompt-suggester"
-     ]
-   }
-   ```
+```bash
+cd ~/.config/opencode/plugins/opencode-prompt-suggester
+npm ci
+npm run build
+```
 
-*(Replace `/Users/YOUR_USERNAME/` with your actual home directory path).*
+The repository already contains the built bundle at
+`dist/gui-experimental.cjs`, so this step is only needed after editing the GUI.
 
----
+### Upgrading from 1.x
 
-### Option 3: Per-Project Installation
+Remove the old path from `plugin` in `opencode.json` and `tui.json`, then add the
+package under the V2 `plugins` array in `opencode.json`. State and configuration
+files are compatible.
 
-To enable prompt suggestions for a specific repository only:
+### Verifying installation
 
-1. Clone or add the plugin submodule to your repository.
-2. In your repo root, add the relative or absolute path to `.opencode/opencode.json`:
-   ```jsonc
-   {
-     "plugin": [
-       "file:///path/to/opencode-prompt-suggester"
-     ]
-   }
-   ```
-3. Add the path to `~/.config/opencode/tui.json` for interactive TUI rendering.
-
----
-
-### Verifying Installation
-
-Restart OpenCode and type:
+Restart OpenCode and run:
 
 ```text
 /suggester
 ```
 
-You should see an info toast confirming that the plugin is loaded and active.
-
----
-
-## Quick Start
-
-1. **Open any project directory**:
-   ```bash
-   cd ~/my-project
-   opencode
-   ```
-2. **Run a prompt**: Send any normal instruction to OpenCode.
-3. **Accept suggestion**: When the turn completes and OpenCode goes idle, press **Space** or **Right Arrow** to accept the suggestion.
-4. **Dismiss suggestion**: Press **Backspace** or start typing your own prompt to clear the ghost text.
-
----
-
-## Command Reference
-
-The plugin registers interactive slash commands in OpenCode:
-
-| Command | Action | Example |
-|---|---|---|
-| `/suggester` | Display current plugin status, active model, and seed state | `/suggester` |
-| `/suggester on` | Enable prompt suggestions for the current project | `/suggester on` |
-| `/suggester off` | Disable prompt suggestions for the current project | `/suggester off` |
-| `/suggester reseed` | Invalidate cached project intent and trigger fresh repo analysis | `/suggester reseed` |
+You should see a toast with the enabled flag, configured model, and seed state.
 
 ---
 
 ## Configuration
 
-Custom configuration can be set globally in `~/.local/state/opencode/opencode-prompt-suggester/config.json` or per-project in `~/.local/state/opencode/opencode-prompt-suggester/projects/<project-key>/config.json`.
+Configuration is read from the same state directory as 1.x:
+
+- Global: `~/.local/state/opencode/opencode-prompt-suggester/config.json`
+- Per project: `~/.local/state/opencode/opencode-prompt-suggester/projects/<project-key>/config.json`
 
 ```jsonc
 {
@@ -244,6 +161,25 @@ Custom configuration can be set globally in `~/.local/state/opencode/opencode-pr
 }
 ```
 
+`inference.suggesterModel` and `inference.seederModel` accept `"small"`,
+`"session-default"`, or an explicit `provider/model` string. `"small"` resolves
+to the default model when no small-model option is available in the host.
+
+The V2 plugin entry can also provide a small model for `"small"` inference:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "./plugins/opencode-prompt-suggester",
+      "options": {
+        "smallModel": "openai/gpt-4o-mini"
+      }
+    }
+  ]
+}
+```
+
 ---
 
 ## Architecture
@@ -252,75 +188,145 @@ Custom configuration can be set globally in `~/.local/state/opencode/opencode-pr
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            OpenCode Session                                 │
 │                                                                             │
-│  User Turn ──> Assistant Executes Tools ──> Turn Completes (session.idle)   │
+│  User Turn ──> Assistant Executes Tools ──> Execution Succeeded/Failed      │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     opencode-prompt-suggester (Server)                      │
+│                  opencode-prompt-suggester (server part)                    │
 │                                                                             │
-│  1. Extract Turn Context (tools, touched files, questions, steering memory) │
-│  2. Instant Fallback ("Yes.", "Go ahead.") ──> writes live.json (<1ms)      │
-│  3. Background Prompt ──> Hidden Session [prompt-suggester]                 │
-│  4. Normalized Output ──> updates live.json with refined suggestion         │
+│  1. Extract turn context (tools, files, questions, steering memory)         │
+│  2. Instant fallback ("Yes.", "Go ahead.") ──> live.json (<1ms)             │
+│  3. Stateless ctx.experimental.generate.text call                           │
+│  4. Normalize output ──> update live.json with the refined suggestion       │
 └──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       OpenCode TUI (Slot & Keymap)                          │
-│                                                                             │
-│  1. Injects ghost text placeholder into active Prompt renderable            │
-│  2. Intercepts Space / Right Arrow keypress when editor is empty            │
-│  3. Populates prompt input buffer (promptRef.set) ──> ready to submit!      │
-└─────────────────────────────────────────────────────────────────────────────┘
+                                       │ live.json + RPC
+                       ┌───────────────┴───────────────┐
+                       ▼                               ▼
+┌─────────────────────────────────┐   ┌─────────────────────────────────────┐
+│      OpenCode TUI part          │   │     OpenCode Desktop GUI bundle     │
+│                                 │   │                                     │
+│  Suggestion bar above composer  │   │  Composer ghost / placeholder text  │
+│  ctrl+alt+n  submit             │   │  tab insert · enter send            │
+│  ctrl+alt+x  dismiss            │   │  escape dismiss                     │
+└─────────────────────────────────┘   └─────────────────────────────────────┘
+```
+
+The server registers its RPC at every active location and stores per-session
+suggestions under the project state directory. The TUI polls that state; the
+Desktop uses the RPC `get` / `refresh` / `clear` methods.
+
+---
+
+## Host patches
+
+Two optional OpenCode patches make the plugin use first-class host APIs instead
+of fallbacks:
+
+```text
+patches/tui-prompt-api.patch        TUI ui.prompt set/submit API
+patches/composer-placeholder.patch  Desktop ComposerPlaceholder registry
+```
+
+Apply them from an OpenCode checkout:
+
+```bash
+git apply ~/.config/opencode/plugins/opencode-prompt-suggester/patches/tui-prompt-api.patch
+git apply ~/.config/opencode/plugins/opencode-prompt-suggester/patches/composer-placeholder.patch
+```
+
+See [`patches/README.md`](patches/README.md) for details and verification steps.
+
+Without the TUI patch, `ctrl+alt+n` shows a warning instead of bypassing the
+composer. Without the Desktop registry, the GUI falls back to the composer's
+existing faint placeholder node.
+
+---
+
+## Diagnostics
+
+The RPC contract exposes `get`, `refresh`, `clear`, `status`, `configure`, and
+`reseed`:
+
+```bash
+opencode api post /api/rpc/prompt-suggester/status \
+  --param 'location[directory]=/path/to/project' \
+  --data '{"input":{"sessionID":"ses_..."}}'
 ```
 
 ---
 
 ## Troubleshooting
 
-### 1. Suggestions do not appear in the prompt box
-- Verify that both `~/.config/opencode/opencode.json` and `~/.config/opencode/tui.json` include the plugin path. TUI plugins are not auto-scanned from `plugins/`.
-- Run `/suggester` in OpenCode to verify that `Enabled: true` is displayed.
+### Suggestions do not appear
 
-### 2. Tab key switches mode instead of accepting suggestions
-- This is intentional: `Tab` is intentionally preserved for OpenCode's native mode switching (e.g., switching between agent modes). Use **Space** or **Right Arrow** to accept suggestions.
+- Confirm the package is listed under `plugins` in `~/.config/opencode/opencode.json`.
+- Run `/suggester` and check that `Enabled: true` is shown.
+- Make sure the session is a root session. Subagent sessions are ignored.
 
-### 3. Suggestions feel generic or unaware of repository structure
-- Run `/suggester reseed` to force the background seeder to re-explore key architecture files, READMEs, and codebase conventions.
+### TUI accepts nothing
 
-### 4. Background inference fails or takes too long
-- By default, suggestions use `"small"` model routing. You can configure `"suggesterModel"` in `config.json` to any specific provider/model (e.g. `"openai/gpt-4o-mini"` or `"anthropic/claude-3-5-haiku-20241022"`).
+- Install the `ui.prompt` patch, or use the Desktop app. The stock V2 TUI does
+  not expose a safe way to submit the composer from a plugin.
+- `/suggester` still works without the patch and reports status.
 
-### 5. Ghost suggestion persists after typing
-- Typing any non-space character automatically clears the ghost text. Pressing **Backspace** on an empty prompt explicitly dismisses the current suggestion.
+### Suggestions feel generic
+
+- Run `/suggester reseed` to clear the cached project intent seed. A new seed is
+  generated on the next eligible turn when reseeding is enabled.
+
+### Desktop ghost text is missing
+
+- Rebuild `dist/gui-experimental.cjs` with `npm run build`.
+- Without the `ComposerPlaceholder` patch the plugin uses a DOM fallback; some
+  Desktop themes may change the placeholder node structure.
+
+### Background inference fails
+
+- Suggestions use `inference.suggesterModel`. Set it to an explicit
+  `provider/model` if `"small"` is unavailable in your host.
 
 ---
 
 ## Limitations
 
-- **Terminal Placeholder Wrapping**: The plugin renders suggestions using the TUI renderable's native placeholder slot. Extremely long terminal resize events may occasionally re-render placeholder text on the next tick.
-- **Single-Line Suggestions**: Suggestions are intentionally limited to single-line prompts (max 200 characters) to optimize speed and conversational flow.
-- **Provider Availability**: Background inference requires an active provider model configuration in OpenCode.
+- TUI ghost insertion (`space` / `right`) and submission require the
+  `ui.prompt` host patch.
+- Desktop prefers the `ComposerPlaceholder` registry; older hosts use the DOM
+  fallback.
+- Suggestions are single-line and capped by `suggestion.maxSuggestionChars`.
+- The server part uses the experimental `experimental.generate.text` API, so the
+  plugin requires OpenCode V2 and `@opencode/plugin` 2.2.5 or newer.
 
 ---
 
 ## FAQ
 
-#### How does this differ from GitHub Copilot ghost text?
-Copilot predicts code completions inside a file buffer. `opencode-prompt-suggester` predicts your next *instructional prompt* to the AI agent based on what the assistant just finished doing.
+#### How does this differ from code ghost text?
 
-#### Does this add cost or slow down my chat turns?
-Primary turns execute at normal speed. Suggestion generation occurs *after* the turn completes and runs in a separate hidden session using lightweight/small models (`gpt-4o-mini`, `claude-3-5-haiku`).
+Code completion predicts source code inside a file buffer.
+`opencode-prompt-suggester` predicts your next *instructional prompt* to the
+agent based on what the assistant just finished doing.
 
-#### What happens if the assistant encounters an error?
-When a turn ends in an error, the plugin detects the failure and suggests a recovery prompt (e.g., `continue` or fix instructions).
+#### Does this add cost or slow down chat turns?
+
+Primary turns run at normal speed. Suggestion generation happens after the turn
+completes and uses the configured suggester model.
+
+#### What happens when a turn fails or is interrupted?
+
+The plugin publishes a short recovery suggestion (`continue`) immediately, then
+refines it with the model when possible.
 
 #### Can I customize the suggestions?
-Yes. Set `suggestion.customInstruction` in your `config.json` to bias suggestions (e.g. `"prefer concise confirmations"` or `"always ask for unit tests"`).
+
+Set `suggestion.customInstruction` in `config.json` to bias suggestions, for
+example `"prefer concise confirmations"` or `"always ask for unit tests"`.
 
 #### Where is state stored?
-All state, seeds, steering memory, and logs are stored locally under `~/.local/state/opencode/opencode-prompt-suggester/`.
+
+Seeds, steering memory, live suggestions, usage counters, and logs live under
+`~/.local/state/opencode/opencode-prompt-suggester/`.
 
 ---
 

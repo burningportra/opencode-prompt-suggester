@@ -74,7 +74,6 @@ export async function saveLive(worktree: string, live: LiveSuggestion, stateOver
 
 interface SessionState {
   lastSuggestion?: string
-  hiddenSessionID?: string
   turnCount?: number
   steering: SteeringEvent[]
   usage: UsageCounters
@@ -92,7 +91,6 @@ export async function loadSessionState(
   const stored = await readJson<SessionState>(await sessionFile(worktree, sessionID, stateOverride))
   return {
     lastSuggestion: stored?.lastSuggestion,
-    hiddenSessionID: stored?.hiddenSessionID,
     turnCount: stored?.turnCount ?? 0,
     steering: stored?.steering ?? [],
     usage: stored?.usage ?? emptyUsage(),

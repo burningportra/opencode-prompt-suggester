@@ -1,0 +1,113 @@
+diff --git a/packages/plugin/src/tui/context.ts b/packages/plugin/src/tui/context.ts
+index fe641b3..ab8a660 100644
+--- a/packages/plugin/src/tui/context.ts
++++ b/packages/plugin/src/tui/context.ts
+@@ -487,6 +487,26 @@ export interface Keymap {
+   }
+ }
+ 
++export interface Prompt {
++  /** The active composer's text. Reactive when read in a Solid computation. */
++  text(): string
++  /** Whether the active composer has no text, files, agents, skills, or pasted parts. Reactive when read in a Solid computation. */
++  isEmpty(): boolean
++  /** Whether the active composer has focus. Not reactive. */
++  focused(): boolean
++  /**
++   * Replaces an empty normal-mode composer with `text` without submitting it. Returns false when no composer is
++   * mounted, the composer is in shell mode, or it already has content.
++   */
++  set(text: string): boolean
++  /**
++   * Replaces an empty normal-mode composer with `text` and submits it through OpenCode's normal prompt path, so the
++   * composer's selected agent, model, attachments, and delivery are committed. Returns false when no composer is
++   * mounted, the composer is in shell mode, or it already has content.
++   */
++  submit(text: string): boolean
++}
++
+ export interface UI {
+   readonly dialog: Dialog
+   readonly toast: Toast
+@@ -506,6 +526,7 @@ export interface UI {
+     /** This plugin's active panel, if any. Reactive when read in a Solid computation. */
+     current(): { readonly name: string; readonly sessionID: string } | undefined
+   }
++  readonly prompt: Prompt
+   readonly tabs: {
+     /** Returns whether session tabs are enabled for this TUI. */
+     enabled(): boolean
+diff --git a/packages/tui/src/plugin/api.tsx b/packages/tui/src/plugin/api.tsx
+index fd9316d..1366f2c 100644
+--- a/packages/tui/src/plugin/api.tsx
++++ b/packages/tui/src/plugin/api.tsx
+@@ -32,6 +32,8 @@ import { useStorage } from "../context/storage"
+ import { useSessionTabs } from "../context/session-tabs"
+ import { useOptionalPanel } from "../context/panel"
+ import { useLocal } from "../context/local"
++import { usePromptRef } from "../context/prompt"
++import { emptyPrompt } from "../prompt/history"
+ import { abbreviateHome } from "../util/path-format"
+ 
+ export type Dispose = () => Promise<void>
+@@ -83,6 +85,7 @@ export function usePluginHost() {
+     sessionTabs: useSessionTabs(),
+     panel: useOptionalPanel(),
+     local: useLocal(),
++    prompt: usePromptRef(),
+   }
+ }
+ 
+@@ -284,6 +287,52 @@ export function createPluginContext(input: {
+           return true
+         },
+       },
++      prompt: {
++        text: () => host.prompt.current?.current.text ?? "",
++        isEmpty: () => {
++          const prompt = host.prompt.current?.current
++          if (!prompt) return true
++          return (
++            prompt.text.trim().length === 0 &&
++            (prompt.files?.length ?? 0) === 0 &&
++            (prompt.agents?.length ?? 0) === 0 &&
++            (prompt.skills?.length ?? 0) === 0 &&
++            (prompt.pasted?.length ?? 0) === 0
++          )
++        },
++        focused: () => host.prompt.current?.focused ?? false,
++        set(text) {
++          const prompt = host.prompt.current
++          if (!prompt || prompt.mode !== "normal") return false
++          const current = prompt.current
++          if (
++            current.text.trim().length > 0 ||
++            (current.files?.length ?? 0) > 0 ||
++            (current.agents?.length ?? 0) > 0 ||
++            (current.skills?.length ?? 0) > 0 ||
++            (current.pasted?.length ?? 0) > 0
++          )
++            return false
++          prompt.set({ ...emptyPrompt(), text })
++          return true
++        },
++        submit(text) {
++          const prompt = host.prompt.current
++          if (!prompt || prompt.mode !== "normal") return false
++          const current = prompt.current
++          if (
++            current.text.trim().length > 0 ||
++            (current.files?.length ?? 0) > 0 ||
++            (current.agents?.length ?? 0) > 0 ||
++            (current.skills?.length ?? 0) > 0 ||
++            (current.pasted?.length ?? 0) > 0
++          )
++            return false
++          prompt.set({ ...emptyPrompt(), text })
++          prompt.submit()
++          return true
++        },
++      },
+       model: {
+         current() {
+           const selection = host.local.model.selection()

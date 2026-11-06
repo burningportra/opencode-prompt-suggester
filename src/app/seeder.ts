@@ -23,26 +23,15 @@ import {
 } from "../prompts/seeder-template.ts"
 import { completeHidden } from "./hidden.ts"
 
-type Client = Parameters<typeof completeHidden>[0]["client"] & {
-  find?: {
-    files?: (...args: never[]) => Promise<unknown>
-    text?: (...args: never[]) => Promise<unknown>
-  }
-  file?: { read?: (...args: never[]) => Promise<unknown> }
-}
-
 export async function runSeeder(input: {
-  client: Client
   directory: string
   worktree: string
+  sessionID: string
   config: SuggesterConfig
   previous: SeedArtifact | null
   trigger: ReseedTrigger
-  hiddenSessionID?: string
-  smallModel?: string
-}): Promise<{ seed: SeedArtifact; hiddenSessionID: string; steps: number }> {
+}): Promise<{ seed: SeedArtifact; steps: number }> {
   const history: Array<{ modelResponse: string; toolResult?: string }> = []
-  let hiddenSessionID = input.hiddenSessionID
   const maxSteps = input.config.seed.maxSteps
 
   for (let step = 1; step <= maxSteps + 1; step++) {
@@ -65,16 +54,12 @@ export async function runSeeder(input: {
           history,
         })
     const result = await completeHidden({
-      client: input.client,
-      hiddenSessionID,
       directory: input.directory,
+      sessionID: input.sessionID,
       system: renderSeederSystemPrompt(),
       prompt,
       modelSpec: input.config.inference.seederModel,
-      smallModel: input.smallModel,
-      reuse: true,
     })
-    hiddenSessionID = result.sessionID
     let parsed: {
       type?: string
       tool?: string
@@ -115,7 +100,7 @@ export async function runSeeder(input: {
         lastReseedReason: input.trigger.reason,
         lastChangedFiles: input.trigger.changedFiles,
       }
-      return { seed, hiddenSessionID, steps: history.length + 1 }
+      return { seed, steps: history.length + 1 }
     }
     if (parsed.type !== "tool" || !parsed.tool) {
       history.push({ modelResponse: result.text, toolResult: "invalid seeder payload" })

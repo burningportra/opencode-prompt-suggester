@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -8,11 +9,11 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
-    "jsx": "preserve",
-    "jsxImportSource": "@opentui/solid"
+    "jsx": "react-jsx",
+    "jsxImportSource": "solid-js"
   },
-  "include": ["src"],
-  "exclude": ["src/tui.ts", "src/tui.tsx"]
+  "include": ["src"]
 }

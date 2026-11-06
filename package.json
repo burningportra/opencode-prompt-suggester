@@ -1,7 +1,7 @@
 {
   "name": "opencode-prompt-suggester",
-  "version": "0.1.3",
-  "description": "Intent-aware next-prompt ghost suggestions for OpenCode",
+  "version": "2.0.0",
+  "description": "Intent-aware next-prompt suggestions for OpenCode V2",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -9,11 +9,16 @@
     "url": "git+https://github.com/burningportra/opencode-prompt-suggester.git"
   },
   "exports": {
+    ".": "./src/server.ts",
     "./server": "./src/server.ts",
-    "./tui": "./src/tui.tsx"
+    "./tui": "./src/tui.tsx",
+    "./rpc": "./src/rpc.ts",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
   },
   "files": [
     "src",
+    "dist",
+    "patches",
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
@@ -21,22 +26,27 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/tui.test.ts src/domain/steering.test.ts src/domain/seed.test.ts src/infra/sdk.test.ts src/app/context.test.ts"
+    "build": "vite build",
+    "test": "node --experimental-strip-types --test src/domain/steering.test.ts src/domain/seed.test.ts src/infra/sdk.test.ts src/app/context.test.ts src/app/hidden.test.ts src/tui.test.ts"
   },
   "engines": {
-    "opencode": ">=1.18.0"
+    "opencode": ">=2.0.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "*",
-    "solid-js": "*"
-  },
-  "dependencies": {
-    "solid-js": "^1.9.14"
+    "@opencode/plugin": ">=2.2.5",
+    "@opentui/core": ">=0.8.0",
+    "@opentui/solid": ">=0.8.0",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.4.3",
+    "@opencode/plugin": "2.2.5",
+    "@opentui/core": "0.8.0",
+    "@opentui/solid": "0.8.0",
     "@types/node": "^22.13.9",
-    "typescript": "^5.8.2"
+    "solid-js": "1.9.17",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vite-plugin-solid": "2.11.10"
   },
   "keywords": [
     "opencode",

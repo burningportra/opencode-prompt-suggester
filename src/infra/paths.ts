@@ -3,7 +3,6 @@ import { homedir } from "node:os"
 import path from "node:path"
 
 export const PLUGIN_ID = "opencode-prompt-suggester"
-export const HIDDEN_SESSION_TITLE = "[prompt-suggester]"
 
 export function stateRoot(override?: string): string {
   if (override) return path.join(override, PLUGIN_ID)

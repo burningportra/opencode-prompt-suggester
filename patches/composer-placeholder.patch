@@ -1,0 +1,319 @@
+diff --git a/packages/app/src/composer/composer.tsx b/packages/app/src/composer/composer.tsx
+index 7de793f..bddbc3d 100644
+--- a/packages/app/src/composer/composer.tsx
++++ b/packages/app/src/composer/composer.tsx
+@@ -1,4 +1,4 @@
+-import { Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
++import { Show, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js"
+ import { makeEventListener } from "@solid-primitives/event-listener"
+ import { createMediaQuery } from "@solid-primitives/media"
+ import { Button } from "@opencode/ui/button"
+@@ -27,6 +27,8 @@ export function Composer(props: {
+   borderUnderlay?: boolean
+   readOnly?: boolean
+   suggestionBoundary?: () => HTMLElement | undefined
++  /** Plugin-provided placeholder for an empty composer; falls back to the app's own placeholder. */
++  placeholder?: Accessor<string | undefined>
+ }) {
+   const dialog = useDialog()
+   const command = useCommand()
+@@ -69,6 +71,7 @@ export function Composer(props: {
+         alternateKeybind={[formatKeybind("mod", language.t), "↵"]}
+         exitShellKeybind={[formatKeybind("esc", language.t)]}
+         suggestionBoundary={props.suggestionBoundary}
++        placeholder={props.placeholder}
+         modelControl={
+           <ComposerModelControl
+             loading={props.model.model.loading}
+diff --git a/packages/app/src/composer/editor/editor.tsx b/packages/app/src/composer/editor/editor.tsx
+index ee7d835..50c838c 100644
+--- a/packages/app/src/composer/editor/editor.tsx
++++ b/packages/app/src/composer/editor/editor.tsx
+@@ -10,6 +10,7 @@ import {
+   Show,
+   Suspense,
+   lazy,
++  type Accessor,
+   type JSX,
+ } from "solid-js"
+ import { createStore } from "solid-js/store"
+@@ -94,6 +95,8 @@ export type ComposerEditorProps = {
+   alternateKeybind?: string[]
+   exitShellKeybind?: string[]
+   suggestionBoundary?: () => HTMLElement | undefined
++  /** Plugin-provided placeholder for an empty composer; used in normal mode only. */
++  placeholder?: Accessor<string | undefined>
+ }
+ 
+ export function ComposerEditor(props: ComposerEditorProps) {
+@@ -174,6 +177,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
+   }
+ 
+   const mode = createMemo(() => props.controller.mode())
++  const pluginPlaceholder = () => (mode() === "normal" ? props.placeholder?.() || undefined : undefined)
+ 
+   const buttons = createMemo(() => ({
+     opacity: mode() === "normal" ? 1 : 0,
+@@ -412,7 +416,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
+                 classList={{ "font-mono! tracking-[-0.04px]": mode() === "shell" }}
+                 style={{ "unicode-bidi": mode() === "normal" ? "plaintext" : undefined, "text-align": "start" }}
+               >
+-                {view.placeholder?.() ??
++                {pluginPlaceholder() ??
++                  view.placeholder?.() ??
+                   (mode() === "shell"
+                     ? i18n.t("ui.promptInput.placeholder.shell")
+                     : i18n.t("ui.promptInput.placeholder.normal", { slash: "/", at: "@" }))}
+diff --git a/packages/app/src/session/composer/plugin-placeholder.test.ts b/packages/app/src/session/composer/plugin-placeholder.test.ts
+new file mode 100644
+index 0000000..0ad1459
+--- /dev/null
++++ b/packages/app/src/session/composer/plugin-placeholder.test.ts
+@@ -0,0 +1,63 @@
++import { describe, expect, spyOn, test } from "bun:test"
++import type { ComposerPlaceholder, ComposerPlaceholderProps } from "@opencode/plugin/gui"
++import type { Item } from "@/runtime/plugin/host"
++import { selectComposerPlaceholder } from "./plugin-placeholder"
++
++const input = {} as ComposerPlaceholderProps
++
++const item = (plugin: string, value: ComposerPlaceholder): Item<ComposerPlaceholder> => ({
++  key: plugin,
++  plugin,
++  value,
++})
++
++describe("selectComposerPlaceholder", () => {
++  test("sorts by order and returns the first non-empty text", () => {
++    expect(
++      selectComposerPlaceholder(
++        [
++          item("slow", { id: "slow", order: 2, show: () => "slow" }),
++          item("fast", { id: "fast", order: 1, show: () => "fast" }),
++        ],
++        input,
++      ),
++    ).toBe("fast")
++  })
++
++  test("skips empty contributions", () => {
++    expect(
++      selectComposerPlaceholder(
++        [item("empty", { id: "empty", show: () => "" }), item("next", { id: "next", show: () => "next" })],
++        input,
++      ),
++    ).toBe("next")
++  })
++
++  test("logs a throwing contribution and continues", () => {
++    const error = spyOn(console, "error").mockImplementation(() => {})
++
++    try {
++      expect(
++        selectComposerPlaceholder(
++          [
++            item("broken", {
++              id: "broken",
++              show: () => {
++                throw new Error("boom")
++              },
++            }),
++            item("next", { id: "next", show: () => "next" }),
++          ],
++          input,
++        ),
++      ).toBe("next")
++      expect(error).toHaveBeenCalledWith("[plugin] broken", expect.any(Error))
++    } finally {
++      error.mockRestore()
++    }
++  })
++
++  test("returns undefined when every contribution is empty", () => {
++    expect(selectComposerPlaceholder([item("empty", { id: "empty", show: () => undefined })], input)).toBeUndefined()
++  })
++})
+diff --git a/packages/app/src/session/composer/plugin-placeholder.ts b/packages/app/src/session/composer/plugin-placeholder.ts
+new file mode 100644
+index 0000000..bd9215f
+--- /dev/null
++++ b/packages/app/src/session/composer/plugin-placeholder.ts
+@@ -0,0 +1,17 @@
++import type { ComposerPlaceholder, ComposerPlaceholderProps } from "@opencode/plugin/gui"
++import type { Item } from "@/runtime/plugin/host"
++
++/** The first non-empty plugin placeholder, in contribution order. */
++export function selectComposerPlaceholder(
++  items: readonly Item<ComposerPlaceholder>[],
++  input: ComposerPlaceholderProps,
++) {
++  for (const item of items.toSorted((left, right) => (left.value.order ?? 0) - (right.value.order ?? 0))) {
++    try {
++      const text = item.value.show(input)
++      if (text) return text
++    } catch (error) {
++      console.error(`[plugin] ${item.plugin}`, error)
++    }
++  }
++}
+diff --git a/packages/app/src/session/composer/region.tsx b/packages/app/src/session/composer/region.tsx
+index d1432a6..f11d79a 100644
+--- a/packages/app/src/session/composer/region.tsx
++++ b/packages/app/src/session/composer/region.tsx
+@@ -52,7 +52,9 @@ import type { Region } from "@/runtime/plugin/panels"
+ import { SessionLocationMissing } from "./location-missing"
+ import { SessionPluginPills } from "./plugin-pills"
+ import { createTimelineActions, type TimelineActionsView, type TimelinePendingActions } from "./timeline-actions"
+-import type { MountedSession, SessionScreen } from "@opencode/plugin/gui"
++import { ComposerPlaceholder, type MountedSession, type SessionScreen } from "@opencode/plugin/gui"
++import { usePluginHost } from "@/runtime/plugin/host"
++import { selectComposerPlaceholder } from "./plugin-placeholder"
+ 
+ export function createActiveSessionRegion(input: {
+   session: SessionModel
+@@ -465,6 +467,15 @@ export function ActiveSessionComposerRegion(props: {
+   )
+ 
+   const alignment = useComposerLaneAlignment()
++  const pluginHost = usePluginHost()
++  const pluginPlaceholder = createMemo(() => {
++    if (props.session.data.isChild()) return
++
++    return selectComposerPlaceholder(pluginHost.items(ComposerPlaceholder), {
++      session: props.view(),
++      screen: props.screen,
++    })
++  })
+   const todos = createMemo(() => sessionTodos(props.session.history.messages(), props.session.data.revertMessageID()))
+   // Like the old dock: the plan shows while the turn runs and still has work left, so stale todos never linger.
+ 
+@@ -617,6 +628,7 @@ export function ActiveSessionComposerRegion(props: {
+                   borderUnderlay
+                   readOnly={props.model.queue.undoing()}
+                   suggestionBoundary={props.suggestionBoundary}
++                  placeholder={pluginPlaceholder}
+                 />
+               </VoiceComposer>
+             </div>
+diff --git a/packages/plugin/src/gui/registries.ts b/packages/plugin/src/gui/registries.ts
+index 09481f4..d6ac55d 100644
+--- a/packages/plugin/src/gui/registries.ts
++++ b/packages/plugin/src/gui/registries.ts
+@@ -684,6 +684,45 @@ export interface ComposerPill {
+   menu?(input: ComposerPillMenuProps): JSX.Element
+ }
+ 
++/** What a composer placeholder receives: the routed session and the screen that owns its composer. Do not destructure. */
++export interface ComposerPlaceholderProps {
++  /** The routed session; a new object when another session is routed. Its fields are getters. */
++  readonly session: MountedSession
++  /** The session screen that owns the composer. */
++  readonly screen: SessionScreen
++}
++
++/**
++ * Faint text shown in an empty session composer before the user starts typing. It is the composer's placeholder, not
++ * the draft: accepting it writes to the draft through `Composer.setText`, and typing replaces it without extra work.
++ * The host shows the first non-empty contribution in `order`, then contribution order. The host does not show a
++ * placeholder in a subagent's session.
++ *
++ * @example
++ * ```ts
++ * ctx.add(ComposerPlaceholder, {
++ *   id: "next-prompt",
++ *   show: ({ session, screen }) => {
++ *     if (screen.composer.text().trim()) return
++ *     return nextPrompt(session.id)
++ *   },
++ * })
++ * ```
++ */
++export interface ComposerPlaceholder {
++  /** The contribution's id, unique within the plugin. */
++  readonly id: string
++  /** Sorts contributions, lowest first; ties keep contribution order. Defaults to 0. */
++  readonly order?: number
++  /**
++   * The placeholder text for one session's empty composer, or undefined to show none. Reactive: the host runs it for
++   * the routed composer and again when what it reads changes, so read the session's state and your own here.
++   *
++   * @param input - The session and its screen. Do not destructure.
++   */
++  show(input: ComposerPlaceholderProps): string | undefined
++}
++
+ /**
+  * One complete fenced code block, as a `CodeBlock` render and a `CodeBlockAction` receive it. Do not destructure:
+  * `session` is a getter.
+@@ -1016,6 +1055,22 @@ export const TitlebarItem = Registry.define<TitlebarItem>("titlebar-item")
+  */
+ export const ComposerPill = Registry.define<ComposerPill>("composer-pill")
+ 
++/**
++ * The registry of placeholder text for an empty session composer.
++ *
++ * @example
++ * ```ts
++ * ctx.add(ComposerPlaceholder, {
++ *   id: "next-prompt",
++ *   show: ({ session, screen }) => {
++ *     if (screen.composer.text().trim()) return
++ *     return nextPrompt(session.id)
++ *   },
++ * })
++ * ```
++ */
++export const ComposerPlaceholder = Registry.define<ComposerPlaceholder>("composer-placeholder")
++
+ /**
+  * The registry of renderers for fenced code blocks, by language.
+  *
+diff --git a/services/site/src/docs/content/build/plugins/gui/index.mdx b/services/site/src/docs/content/build/plugins/gui/index.mdx
+index 4adbbfa..fb8aae2 100644
+--- a/services/site/src/docs/content/build/plugins/gui/index.mdx
++++ b/services/site/src/docs/content/build/plugins/gui/index.mdx
+@@ -1255,6 +1255,44 @@ interface ComposerPillRow {
+ type ComposerPillTone = "success" | "warning" | "danger"
+ ```
+ 
++### Composer placeholder
++
++`ComposerPlaceholder` supplies faint placeholder text for an empty session composer. Use it for a suggestion the user
++can accept, such as the next prompt. The host shows the first non-empty contribution in `order`, then contribution
++order. Typing replaces the placeholder, and the text is not part of the draft until you write it with
++`screen.composer.setText`.
++
++`show` returns the text for one session, or `undefined` to show none. The host runs it for the routed composer, and
++again when what it reads changes. Return `undefined` while the composer has text, because the placeholder is only
++visible when the draft is empty:
++
++```tsx
++import { ComposerPlaceholder } from "@opencode/plugin/gui"
++
++ctx.add(ComposerPlaceholder, {
++  id: "next-prompt",
++  show: ({ session, screen }) => {
++    if (screen.composer.text().trim()) return
++    return nextPrompt(session.id)
++  },
++})
++```
++
++#### Reference
++
++```ts
++interface ComposerPlaceholder {
++  id: string
++  order?: number
++  show(input: ComposerPlaceholderProps): string | undefined
++}
++
++interface ComposerPlaceholderProps {
++  session: MountedSession
++  screen: SessionScreen
++}
++```
++
+ ### Code blocks
+ 
+ `CodeBlock` renders the fenced code blocks of the languages you list as your own UI, in place of the highlighted code.

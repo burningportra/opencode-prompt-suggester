@@ -1,270 +1,245 @@
 /** @jsxImportSource @opentui/solid */
-import { readdir } from "node:fs/promises"
-import path from "node:path"
-import type { TuiPlugin, TuiPluginModule, TuiPromptRef } from "@opencode-ai/plugin/tui"
-import { loadConfig, loadLive, loadSeed, readJson, saveConfig, saveSeed } from "./infra/store.ts"
-import { PLUGIN_ID, stateRoot } from "./infra/paths.ts"
-import type { LiveSuggestion } from "./domain/suggestion.ts"
+import { unlink } from "node:fs/promises"
+import { Plugin } from "@opencode/plugin/tui"
+import { createSignal, Show } from "solid-js"
+import { loadConfig, loadLive, loadSeed, saveConfig } from "./infra/store.ts"
+import { seedPath } from "./infra/paths.ts"
 
-type KeyLike = {
-  name?: string
-  key?: string
-  sequence?: string
-  preventDefault?: () => void
+type PromptApi = {
+  text?(): string
+  isEmpty(): boolean
+  focused?(): boolean
+  set?(text: string): boolean
+  submit?(text: string): boolean
 }
 
-const tui: TuiPlugin = async (api) => {
-  const roots = [...new Set([api.state.path.worktree, api.state.path.directory].filter(Boolean))] as string[]
-  const solid = await import("solid-js").catch(() => undefined)
-  const [ghost, setGhost] = solid?.createSignal("") ?? [() => "", (_: string) => undefined]
-  let dismissed = ""
-  let submitted = false
-  let promptRef: TuiPromptRef | undefined
+export default Plugin.define({
+  id: "opencode-prompt-suggester",
+  setup(context) {
+    const directory = context.location?.directory ?? context.data.location.default().directory
+    const [ghost, setGhost] = createSignal("")
+    const [ghostSession, setGhostSession] = createSignal<string | undefined>()
+    let dismissed = ""
+    let liveUpdated = ""
 
-  const sessionID = () => {
-    const route = api.route.current
-    if (route.name === "session") return String(route.params?.sessionID ?? "") || undefined
-    return undefined
-  }
+    const promptApi = (context.ui as typeof context.ui & { prompt?: PromptApi }).prompt
 
-  const typed = () => promptRef?.current.input ?? ""
-
-  const clearGhost = () => {
-    setGhost("")
-  }
-
-  const accept = () => {
-    const text = ghost()
-    if (!text || !promptRef) return false
-    promptRef.set({ input: text, parts: [] })
-    clearGhost()
-    return true
-  }
-
-  const refresh = async () => {
-    const id = sessionID()
-    const live = await findLive(roots, id)
-    if (submitted || !live || live.status !== "ready" || !live.text || live.text === dismissed) {
-      if (ghost()) clearGhost()
-      return
+    const currentSessionID = () => {
+      const route = context.ui.router.current()
+      return route.type === "session" ? route.sessionID : undefined
     }
-    if (id && live.sessionID !== id) return
-    setGhost(live.text)
-  }
 
-  api.event.on("session.idle", () => {
-    dismissed = ""
-    submitted = false
-    void refresh()
-  })
-  const poll = setInterval(() => {
-    void refresh()
-    if (ghost() && typed() === " ") accept()
-  }, 100)
-  api.lifecycle.onDispose(() => clearInterval(poll))
+    const clearGhost = () => {
+      setGhost("")
+      setGhostSession(undefined)
+    }
 
-  const isRightArrowSeq = (str: string): boolean => {
-    return (
-      str === "\x1b[C" ||
-      str === "\x1bOC" ||
-      str === "\x1b[1;5C" ||
-      str === "\x1b[1;2C" ||
-      str === "\x1b[1;3C" ||
-      str === "\x1b[1;4C" ||
-      str === "\x1b[5C" ||
-      str.includes("\x1b[C") ||
-      str.includes("\x1bOC")
-    )
-  }
+    const sessionDirectory = (sessionID: string) =>
+      context.data.session.get(sessionID)?.location?.directory ?? directory
 
-  const isDismissSeq = (str: string): boolean => {
-    return str === "\x7f" || str === "\x08" || str === "\x1b[3~"
-  }
-
-  if (typeof process !== "undefined" && process.stdin?.on) {
-    const onStdin = (chunk: Buffer | string) => {
-      if (typed().trim()) return
-      const str = typeof chunk === "string" ? chunk : chunk.toString("utf8")
-      if (isRightArrowSeq(str) && ghost()) {
-        accept()
-      } else if (isDismissSeq(str) && ghost()) {
-        dismissed = ghost()
+    const refresh = async () => {
+      const sessionID = currentSessionID()
+      if (!sessionID) {
         clearGhost()
+        return
       }
+
+      const live = await loadLive(sessionDirectory(sessionID), sessionID)
+      if (!live || live.status !== "ready" || !live.text || live.sessionID !== sessionID) {
+        clearGhost()
+        return
+      }
+
+      if (live.updatedAt !== liveUpdated) {
+        liveUpdated = live.updatedAt
+        dismissed = ""
+      }
+
+      if (live.text === dismissed) {
+        clearGhost()
+        return
+      }
+
+      setGhost(live.text)
+      setGhostSession(sessionID)
     }
-    process.stdin.on("data", onStdin)
-    api.lifecycle.onDispose(() => {
-      process.stdin.off("data", onStdin)
-    })
-  }
 
-  const isAcceptKey = (evt: KeyLike) => {
-    const name = String(evt.name ?? "").toLowerCase()
-    const key = String(evt.key ?? "").toLowerCase()
-    const seq = String(evt.sequence ?? "")
-    return (
-      name === "space" ||
-      name === " " ||
-      name === "right" ||
-      name === "arrowright" ||
-      name === "arrow_right" ||
-      key === " " ||
-      key === "space" ||
-      key === "right" ||
-      key === "arrowright" ||
-      seq === " " ||
-      isRightArrowSeq(seq)
-    )
-  }
+    const accept = (submit: boolean) => {
+      const text = ghost()
+      if (!text) return
 
-  const isDismissKey = (evt: KeyLike) => {
-    const name = String(evt.name ?? "").toLowerCase()
-    const key = String(evt.key ?? "").toLowerCase()
-    const seq = String(evt.sequence ?? "")
-    return (
-      name === "backspace" ||
-      name === "delete" ||
-      key === "backspace" ||
-      key === "delete" ||
-      isDismissSeq(seq)
-    )
-  }
+      if (!promptApi) {
+        context.ui.toast.show({
+          title: "Prompt suggester",
+          message:
+            "This OpenCode build has no TUI prompt API. Update OpenCode, apply patches/tui-prompt-api.patch, or use the Desktop app.",
+          variant: "warning",
+        })
+        return
+      }
 
-  const keymap = (api as { keymap?: { intercept?: (fn: (evt: KeyLike) => unknown) => () => void } }).keymap
-  keymap?.intercept?.((evt) => {
-    if (typed()) return
-    if (isAcceptKey(evt) && ghost()) {
-      evt.preventDefault?.()
-      accept()
-      return true
+      if (!promptApi.isEmpty()) {
+        context.ui.toast.show({
+          title: "Prompt suggester",
+          message: "Clear the prompt before accepting a suggestion.",
+          variant: "warning",
+        })
+        return
+      }
+
+      const ok = submit ? promptApi.submit?.(text) === true : promptApi.set?.(text) === true
+      if (!ok) {
+        context.ui.toast.show({
+          title: "Prompt suggester",
+          message: submit ? "Could not submit the suggestion." : "Could not insert the suggestion.",
+          variant: "warning",
+        })
+        return
+      }
+
+      dismissed = text
+      clearGhost()
     }
-    if (isDismissKey(evt) && ghost()) {
-      evt.preventDefault?.()
+
+    const dismiss = () => {
+      if (!ghost()) return
       dismissed = ghost()
       clearGhost()
-      return true
     }
-  })
 
-  api.slots.register({
-    order: 50,
-    slots: {
-      session_prompt(
-        _ctx: unknown,
-        props: {
-          session_id: string
-          visible?: boolean
-          disabled?: boolean
-          on_submit?: () => void
-          ref?: (ref: TuiPromptRef | undefined) => void
-        },
-      ) {
-        const text = ghost()
-        return api.ui.Prompt({
-          sessionID: props.session_id,
-          visible: props.visible,
-          disabled: props.disabled,
-          onSubmit: () => {
-            dismissed = ghost() || dismissed
-            submitted = true
-            clearGhost()
-            props.on_submit?.()
-          },
-          showPlaceholder: true,
-          placeholders: text ? { normal: [text] } : undefined,
-          ref: (ref) => {
-            promptRef = ref
-            props.ref?.(ref)
-          },
-        })
-      },
-    },
-  } as never)
+    const command = async (input?: string) => {
+      const action = (input ?? "").trim().toLowerCase()
 
-  api.command?.register?.(() => [
-    {
-      title: "Suggester: Settings & Status",
-      value: "suggester",
-      category: "Suggester",
-      description: "View status and configure prompt suggester",
-      slash: { name: "suggester" },
-      onSelect: async () => {
-        const root = roots[0]
-        if (!root) return
-        const cfg = await loadConfig(root)
-        const live = await findLive(roots, sessionID())
-        const seed = await loadSeed(root)
-        api.ui.toast({
-          variant: "info",
-          title: "Suggester Status",
-          message: `Enabled: ${cfg.enabled} | Model: ${cfg.inference.suggesterModel} | Seed: ${seed ? "ready" : "none"} | Current: ${live?.text || "(none)"}`,
-        })
-      },
-    },
-    {
-      title: "Suggester: Enable",
-      value: "suggester.on",
-      category: "Suggester",
-      description: "Enable prompt suggestions",
-      slash: { name: "suggester on", aliases: ["suggester:on"] },
-      onSelect: async () => {
-        const root = roots[0]
-        if (root) await saveConfig(root, "project", { enabled: true })
-        api.ui.toast({ variant: "success", message: "Prompt suggester enabled" })
-        void refresh()
-      },
-    },
-    {
-      title: "Suggester: Disable",
-      value: "suggester.off",
-      category: "Suggester",
-      description: "Disable prompt suggestions",
-      slash: { name: "suggester off", aliases: ["suggester:off"] },
-      onSelect: async () => {
-        const root = roots[0]
-        if (root) await saveConfig(root, "project", { enabled: false })
-        clearGhost()
-        api.ui.toast({ variant: "info", message: "Prompt suggester disabled" })
-      },
-    },
-    {
-      title: "Suggester: Reseed Project Intent",
-      value: "suggester.reseed",
-      category: "Suggester",
-      description: "Trigger fresh intent re-seeding",
-      slash: { name: "suggester reseed", aliases: ["suggester:reseed"] },
-      onSelect: async () => {
-        const root = roots[0]
-        if (root) {
-          const { unlink } = await import("node:fs/promises")
-          const { seedPath } = await import("./infra/paths.ts")
-          await unlink(seedPath(root)).catch(() => undefined)
+      if (action === "on" || action === "off") {
+        await saveConfig(directory, "project", { enabled: action === "on" })
+        if (action === "off") {
+          dismissed = ghost()
+          clearGhost()
         }
-        api.ui.toast({ variant: "info", message: "Project intent seed reset; will reseed next turn." })
-      },
-    },
-  ])
+        context.ui.toast.show({
+          title: "Prompt suggester",
+          message: action === "on" ? "Suggestions enabled." : "Suggestions disabled.",
+          variant: "success",
+        })
+        return
+      }
 
-  void refresh()
-}
+      if (action === "reseed") {
+        await unlink(seedPath(directory)).catch(() => undefined)
+        context.ui.toast.show({
+          title: "Prompt suggester",
+          message: "Project intent seed cleared; it will reseed on the next turn.",
+          variant: "info",
+        })
+        return
+      }
 
-async function findLive(roots: string[], sessionID?: string): Promise<LiveSuggestion | null> {
-  for (const root of roots) {
-    const live = await loadLive(root, sessionID)
-    if (live) return live
-  }
-  if (!sessionID) return null
-  const projects = await readdir(path.join(stateRoot(), "projects")).catch(() => [])
-  for (const project of projects) {
-    const live = await readJson<LiveSuggestion>(
-      path.join(stateRoot(), "projects", project, "sessions", sessionID, "live.json"),
-    )
-    if (live) return live
-  }
-  return null
-}
+      const sessionID = currentSessionID()
+      const [config, seed, live] = await Promise.all([
+        loadConfig(directory),
+        loadSeed(directory),
+        sessionID ? loadLive(sessionDirectory(sessionID), sessionID) : Promise.resolve(null),
+      ])
+      context.ui.toast.show({
+        title: "Prompt suggester",
+        message: `Enabled: ${config.enabled} | Model: ${config.inference.suggesterModel} | Seed: ${seed ? "ready" : "none"} | Current: ${live?.text || "(none)"}`,
+        variant: "info",
+      })
+    }
 
-export default {
-  id: PLUGIN_ID,
-  tui,
-} satisfies TuiPluginModule
+    const removeSlot = context.ui.slot({
+      append: "session.composer.top",
+      render: (input) => (
+        <Show when={ghost() && input.sessionID === ghostSession()}>
+          <box flexDirection="row" gap={1} paddingLeft={2} paddingRight={2}>
+            <text fg={context.theme.text.faint}>↳</text>
+            <text fg={context.theme.text.muted}>{ghost()}</text>
+            <text fg={context.theme.text.faint}>
+              {promptApi?.set ? "space / right · ctrl+alt+n" : "ctrl+alt+n"}
+            </text>
+          </box>
+        </Show>
+      ),
+    })
+
+    context.keymap.layer(() => {
+      const text = ghost()
+      const empty = promptApi ? promptApi.isEmpty() : true
+
+      return {
+        mode: "global",
+        priority: 100,
+        commands: [
+          {
+            id: "suggester.accept",
+            title: "Accept suggested next prompt",
+            bind: "ctrl+alt+n",
+            enabled: Boolean(text),
+            run: () => accept(true),
+          },
+          {
+            id: "suggester.dismiss",
+            title: "Dismiss suggested next prompt",
+            bind: "ctrl+alt+x",
+            enabled: Boolean(text),
+            run: dismiss,
+          },
+          {
+            id: "suggester.command",
+            title: "Suggester: Settings & Status",
+            palette: true,
+            slash: { name: "suggester", aliases: ["suggester:status"], arguments: true },
+            run: command,
+          },
+          ...(promptApi?.set
+            ? [
+                {
+                  id: "suggester.insert-space",
+                  title: "Insert suggested next prompt",
+                  bind: "space",
+                  enabled: Boolean(text) && empty,
+                  run: () => accept(false),
+                },
+                {
+                  id: "suggester.insert-right",
+                  title: "Insert suggested next prompt",
+                  bind: "right",
+                  enabled: Boolean(text) && empty,
+                  run: () => accept(false),
+                },
+                {
+                  id: "suggester.dismiss-backspace",
+                  title: "Dismiss suggested next prompt",
+                  bind: "backspace",
+                  enabled: Boolean(text) && empty,
+                  run: dismiss,
+                },
+              ]
+            : []),
+        ],
+      }
+    })
+
+    void refresh()
+    const timer = setInterval(() => void refresh(), 250)
+    const offSucceeded = context.data.on("session.execution.succeeded", () => {
+      dismissed = ""
+      void refresh()
+    })
+    const offFailed = context.data.on("session.execution.failed", () => {
+      dismissed = ""
+      void refresh()
+    })
+    const offStarted = context.data.on("session.execution.started", () => {
+      clearGhost()
+    })
+
+    return () => {
+      clearInterval(timer)
+      offSucceeded()
+      offFailed()
+      offStarted()
+      removeSlot()
+    }
+  },
+})
